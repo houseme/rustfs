@@ -44,5 +44,35 @@ rustfs-utils = { workspace = true, features = ["io", "hash", "compress"] }
 serde_json.workspace = true
 md-5 = { workspace = true }
 
+# Async trait support
+async-trait = "0.1"
+
+# io_uring support (Linux only)
+monoio = { version = "0.2", optional = true }
+monoio-compat = { version = "0.2", optional = true }
+
+# Metrics and observability
+metrics = { workspace = true, optional = true }
+tracing = { workspace = true }
+
+# Resource management
+scopeguard = "1.2"
+
+# Semaphore for concurrency control
+async-semaphore = "1.2"
+
 [dev-dependencies]
 tokio-test = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.10"
+tracing-subscriber = { workspace = true }
+
+[features]
+default = []
+io_uring = ["monoio", "monoio-compat"]
+metrics = ["dep:metrics"]
+full = ["io_uring", "metrics"]
+
+[[bench]]
+name = "disk_io_benchmark"
+harness = false
