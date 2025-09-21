@@ -19,7 +19,7 @@
 //! write throughput for high-frequency logging operations.
 
 use crate::disk::{AsyncFile, DiskFile};
-use crate::runtime::RuntimeHandle;
+use crate::runtime::{RuntimeHandle, RuntimeError};
 use bytes::{Bytes, BytesMut};
 use std::collections::VecDeque;
 use std::io::{Error as IoError, Result as IoResult};
@@ -111,7 +111,7 @@ impl WalEntry {
     }
 }
 
-/// Configuration for WAL behavior
+/// Configuration for WAL behavior with enhanced timeout settings
 #[derive(Debug, Clone)]
 pub struct WalConfig {
     /// Maximum number of entries to batch before flushing
@@ -122,6 +122,8 @@ pub struct WalConfig {
     pub sync_after_batch: bool,
     /// Buffer size for batch operations
     pub buffer_size: usize,
+    /// Timeout for WAL file scanning operations
+    pub scan_timeout: Option<Duration>,
 }
 
 impl Default for WalConfig {
@@ -131,6 +133,7 @@ impl Default for WalConfig {
             flush_timeout: Duration::from_millis(10), // Flush after 10ms if not full
             sync_after_batch: true, // Ensure durability
             buffer_size: 64 * 1024, // 64KB buffer
+            scan_timeout: Some(Duration::from_secs(30)), // 30 second scan timeout
         }
     }
 }
@@ -139,7 +142,7 @@ impl Default for WalConfig {
 pub struct Wal {
     /// WAL file handle
     file: Arc<Mutex<DiskFile>>,
-    /// Runtime handle for I/O operations
+    /// Runtime handle for I/O operations  
     runtime: RuntimeHandle,
     /// Configuration
     config: WalConfig,
@@ -149,18 +152,16 @@ pub struct Wal {
     next_sequence: Arc<RwLock<u64>>,
     /// Channel for sending entries to the background writer
     write_tx: mpsc::UnboundedSender<WalEntry>,
-    /// Background writer task handle
-    _writer_task: tokio::task::JoinHandle<()>,
 }
 
 impl Wal {
-    /// Create a new WAL instance
+    /// Create a new WAL instance with enhanced error handling
     #[instrument(skip(runtime), fields(path = %path.as_ref().display()))]
     pub async fn new<P: AsRef<Path>>(
         path: P,
         runtime: RuntimeHandle,
         config: WalConfig,
-    ) -> IoResult<Self> {
+    ) -> Result<Self, RuntimeError> {
         let file = DiskFile::create(path.as_ref(), runtime.clone()).await?;
         let file = Arc::new(Mutex::new(file));
         
@@ -169,8 +170,8 @@ impl Wal {
         
         let (write_tx, write_rx) = mpsc::unbounded_channel();
         
-        // Start background writer task
-        let writer_task = tokio::spawn(Self::writer_task(
+        // Start background writer task in a detached manner
+        let _writer_task = runtime.spawn(Self::writer_task(
             file.clone(),
             write_rx,
             config.clone(),
@@ -186,30 +187,30 @@ impl Wal {
             write_position,
             next_sequence,
             write_tx,
-            _writer_task: writer_task,
         })
     }
     
-    /// Open an existing WAL file
+    /// Open an existing WAL file with enhanced error handling
     #[instrument(skip(runtime), fields(path = %path.as_ref().display()))]
     pub async fn open<P: AsRef<Path>>(
         path: P,
         runtime: RuntimeHandle,
         config: WalConfig,
-    ) -> IoResult<Self> {
+    ) -> Result<Self, RuntimeError> {
         let file = DiskFile::open(path.as_ref(), runtime.clone()).await?;
         let file = Arc::new(Mutex::new(file));
         
-        // Scan the file to determine current position and next sequence
-        let (write_position, next_sequence) = Self::scan_wal_file(file.clone()).await?;
+        // Scan the file to determine current position and next sequence with timeout
+        let (write_position, next_sequence) = Self::scan_wal_file(file.clone()).await
+            .map_err(|e| RuntimeError::InitializationFailed(format!("WAL scan failed: {}", e)))?;
         
         let write_position = Arc::new(RwLock::new(write_position));
         let next_sequence = Arc::new(RwLock::new(next_sequence));
         
         let (write_tx, write_rx) = mpsc::unbounded_channel();
         
-        // Start background writer task
-        let writer_task = tokio::spawn(Self::writer_task(
+        // Start background writer task in a detached manner
+        let _writer_task = runtime.spawn(Self::writer_task(
             file.clone(),
             write_rx,
             config.clone(),
@@ -225,7 +226,6 @@ impl Wal {
             write_position,
             next_sequence,
             write_tx,
-            _writer_task: writer_task,
         })
     }
     
@@ -445,7 +445,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_wal_creation() {
-        let runtime = init_runtime();
+        let runtime = init_runtime().unwrap();
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
         
@@ -458,7 +458,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_wal_append() {
-        let runtime = init_runtime();
+        let runtime = init_runtime().unwrap();
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
         
@@ -479,7 +479,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_wal_batch_append() {
-        let runtime = init_runtime();
+        let runtime = init_runtime().unwrap();
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
         

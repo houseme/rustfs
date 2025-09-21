@@ -67,7 +67,7 @@ pub mod disk;
 pub mod wal;
 
 // Re-export core runtime functionality
-pub use runtime::{init_runtime, init_runtime_with_config, RuntimeConfig, RuntimeHandle, RuntimeType};
+pub use runtime::{init_runtime, init_runtime_with_config, RuntimeConfig, RuntimeHandle, RuntimeType, RuntimeError};
 pub use disk::{AsyncFile, DiskFile};
 pub use wal::{Wal, WalConfig, WalEntry};
 

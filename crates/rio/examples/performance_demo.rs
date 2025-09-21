@@ -102,7 +102,7 @@ async fn benchmark_tokio(test_data: &[u8]) -> Result<std::time::Duration, Box<dy
 }
 
 async fn benchmark_rio(test_data: &[u8]) -> Result<std::time::Duration, Box<dyn std::error::Error>> {
-    let runtime = init_runtime();
+    let runtime = init_runtime()?;
     let temp_dir = tempfile::tempdir()?;
     let start = Instant::now();
     

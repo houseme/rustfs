@@ -18,7 +18,7 @@
 //! on Linux systems for zero-copy, high-throughput disk I/O while maintaining
 //! compatibility with tokio on other platforms.
 
-use crate::runtime::{RuntimeHandle, RuntimeType};
+use crate::runtime::{RuntimeHandle, RuntimeType, RuntimeError};
 use std::io::Result as IoResult;
 use std::path::Path;
 use std::pin::Pin;
@@ -33,16 +33,26 @@ use metrics::{counter, histogram};
 /// This prevents overwhelming the I/O subsystem with too many concurrent operations
 static GLOBAL_FILE_SEMAPHORE: std::sync::OnceLock<async_semaphore::Semaphore> = std::sync::OnceLock::new();
 
-/// Get or initialize the global file operation semaphore
-fn get_file_semaphore() -> &'static async_semaphore::Semaphore {
+/// Get or initialize the global file operation semaphore with better error handling
+fn get_file_semaphore() -> Result<&'static async_semaphore::Semaphore, RuntimeError> {
     GLOBAL_FILE_SEMAPHORE.get_or_init(|| {
         let permits = std::env::var("RUSTFS_MAX_CONCURRENT_FILE_OPS")
             .and_then(|s| s.parse().map_err(|_| std::env::VarError::NotPresent))
             .unwrap_or(1024); // Default to 1024 concurrent file operations
         
-        tracing::info!("Initializing file operation semaphore with {} permits", permits);
-        async_semaphore::Semaphore::new(permits)
-    })
+        // Validate the permit count to avoid resource exhaustion
+        let validated_permits = if permits > 0 && permits <= 65536 {
+            permits
+        } else {
+            tracing::warn!("Invalid RUSTFS_MAX_CONCURRENT_FILE_OPS value: {}, using default 1024", permits);
+            1024
+        };
+        
+        tracing::info!("Initializing file operation semaphore with {} permits", validated_permits);
+        async_semaphore::Semaphore::new(validated_permits)
+    });
+    
+    GLOBAL_FILE_SEMAPHORE.get().ok_or(RuntimeError::InitializationFailed("Failed to initialize file semaphore".to_string()))
 }
 
 /// Trait for high-performance async file operations
@@ -91,25 +101,34 @@ enum DiskFileInner {
 impl DiskFile {
     /// Open a file with optimized settings for the current runtime
     #[instrument(skip(runtime_handle), fields(path = %path.as_ref().display()))]
-    pub async fn open<P: AsRef<Path>>(path: P, runtime_handle: RuntimeHandle) -> IoResult<Self> {
-        let _permit = get_file_semaphore().acquire().await;
+    pub async fn open<P: AsRef<Path>>(path: P, runtime_handle: RuntimeHandle) -> Result<Self, RuntimeError> {
+        let semaphore = get_file_semaphore()?;
+        let _permit = semaphore.acquire().await;
         
         #[cfg(feature = "metrics")]
         counter!("rustfs_file_opens_total", "runtime" => format!("{:?}", runtime_handle.runtime_type())).increment(1);
         
         let _start = std::time::Instant::now();
         
+        // Use the runtime's timeout for file operations
+        let timeout = runtime_handle.config().io_timeout;
+        
         let inner = match runtime_handle.runtime_type() {
             RuntimeType::Tokio => {
-                let file = tokio::fs::File::open(path.as_ref()).await?;
+                let file = tokio::time::timeout(timeout, tokio::fs::File::open(path.as_ref()))
+                    .await
+                    .map_err(|_| RuntimeError::OperationTimeout)?
+                    .map_err(|e| RuntimeError::IoError(e.to_string()))?;
                 DiskFileInner::Tokio(file)
             }
             #[cfg(feature = "io_uring")]
             RuntimeType::Monoio => {
-                // In a real implementation, we'd use monoio::fs::File::open
-                // For now, fall back to tokio
-                tracing::warn!("Monoio not fully implemented, falling back to Tokio");
-                let file = tokio::fs::File::open(path.as_ref()).await?;
+                // For now, fall back to tokio with timeout
+                tracing::warn!("Monoio not fully implemented, falling back to Tokio with enhanced error handling");
+                let file = tokio::time::timeout(timeout, tokio::fs::File::open(path.as_ref()))
+                    .await
+                    .map_err(|_| RuntimeError::OperationTimeout)?
+                    .map_err(|e| RuntimeError::IoError(e.to_string()))?;
                 DiskFileInner::Tokio(file)
             }
         };
@@ -127,24 +146,34 @@ impl DiskFile {
     
     /// Create a new file with optimized settings
     #[instrument(skip(runtime_handle), fields(path = %path.as_ref().display()))]
-    pub async fn create<P: AsRef<Path>>(path: P, runtime_handle: RuntimeHandle) -> IoResult<Self> {
-        let _permit = get_file_semaphore().acquire().await;
+    pub async fn create<P: AsRef<Path>>(path: P, runtime_handle: RuntimeHandle) -> Result<Self, RuntimeError> {
+        let semaphore = get_file_semaphore()?;
+        let _permit = semaphore.acquire().await;
         
         #[cfg(feature = "metrics")]
         counter!("rustfs_file_creates_total", "runtime" => format!("{:?}", runtime_handle.runtime_type())).increment(1);
         
         let _start = std::time::Instant::now();
         
+        // Use the runtime's timeout for file operations
+        let timeout = runtime_handle.config().io_timeout;
+        
         let inner = match runtime_handle.runtime_type() {
             RuntimeType::Tokio => {
-                let file = tokio::fs::File::create(path.as_ref()).await?;
+                let file = tokio::time::timeout(timeout, tokio::fs::File::create(path.as_ref()))
+                    .await
+                    .map_err(|_| RuntimeError::OperationTimeout)?
+                    .map_err(|e| RuntimeError::IoError(e.to_string()))?;
                 DiskFileInner::Tokio(file)
             }
             #[cfg(feature = "io_uring")]
             RuntimeType::Monoio => {
-                // In a real implementation, we'd use monoio::fs::File::create
-                tracing::warn!("Monoio not fully implemented, falling back to Tokio");
-                let file = tokio::fs::File::create(path.as_ref()).await?;
+                // For now, fall back to tokio with timeout
+                tracing::warn!("Monoio not fully implemented, falling back to Tokio with enhanced error handling");  
+                let file = tokio::time::timeout(timeout, tokio::fs::File::create(path.as_ref()))
+                    .await
+                    .map_err(|_| RuntimeError::OperationTimeout)?
+                    .map_err(|e| RuntimeError::IoError(e.to_string()))?;
                 DiskFileInner::Tokio(file)
             }
         };
@@ -196,9 +225,9 @@ impl DiskFile {
     
     /// Bounded write operation to prevent resource exhaustion
     #[instrument(skip(self, data))]
-    pub async fn bounded_write(&mut self, data: &[u8], offset: u64) -> IoResult<usize> {
-        let _permit = get_file_semaphore().acquire().await;
-        self.write_object(data, offset).await
+    pub async fn bounded_write(&mut self, data: &[u8], offset: u64) -> Result<usize, RuntimeError> {
+        let _permit = get_file_semaphore()?.acquire().await;
+        self.write_object(data, offset).await.map_err(|e| RuntimeError::IoError(e.to_string()))
     }
 }
 
@@ -378,7 +407,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_disk_file_operations() {
-        let runtime = init_runtime();
+        let runtime = init_runtime().unwrap();
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
         
@@ -401,7 +430,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_bounded_write() {
-        let runtime = init_runtime();
+        let runtime = init_runtime().unwrap();
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
         

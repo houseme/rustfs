@@ -47,6 +47,9 @@ md-5 = { workspace = true }
 # Async trait support
 async-trait = "0.1"
 
+# Error handling
+thiserror = "2.0"
+
 # io_uring support (Linux only)
 monoio = { version = "0.2", optional = true }
 monoio-compat = { version = "0.2", optional = true }
