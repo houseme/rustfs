@@ -49,20 +49,27 @@ async-trait = "0.1"
 
 # Error handling
 thiserror = "2.0"
+anyhow = "1.0"
 
-# io_uring support (Linux only)
+# io_uring support (Linux only) - Use default features
 monoio = { version = "0.2", optional = true }
 monoio-compat = { version = "0.2", optional = true }
 
-# Metrics and observability
+# Metrics and observability - Enhanced tracing support
 metrics = { workspace = true, optional = true }
 tracing = { workspace = true }
+tracing-futures = { version = "0.2", optional = true }
 
 # Resource management
 scopeguard = "1.2"
 
-# Semaphore for concurrency control
+# Semaphore for concurrency control - Enhanced with sync primitives
 async-semaphore = "1.2"
+tokio-stream = "0.1"
+
+# Performance optimization
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
 
 [dev-dependencies]
 tokio-test = { workspace = true }
@@ -72,10 +79,15 @@ tracing-subscriber = { workspace = true }
 
 [features]
 default = []
-io_uring = ["monoio", "monoio-compat"]
+io_uring = ["monoio", "monoio-compat", "tracing-futures"]
 metrics = ["dep:metrics"]
-full = ["io_uring", "metrics"]
+advanced_tracing = ["tracing-futures"]
+full = ["io_uring", "metrics", "advanced_tracing"]
 
 [[bench]]
 name = "disk_io_benchmark"
+harness = false
+
+[[bench]]
+name = "advanced_io_benchmark"
 harness = false

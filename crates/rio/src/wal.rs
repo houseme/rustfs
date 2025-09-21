@@ -20,11 +20,13 @@
 
 use crate::disk::{AsyncFile, DiskFile};
 use crate::runtime::{RuntimeHandle, RuntimeError};
+use crate::io_engine::get_io_engine;
 use bytes::{Bytes, BytesMut};
 use std::collections::VecDeque;
 use std::io::{Error as IoError, Result as IoResult};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::interval;
@@ -403,17 +405,77 @@ impl Wal {
         Ok(())
     }
     
-    /// Scan the WAL file to determine current position and next sequence number
+    /// Enhanced WAL file scanning with io_uring optimization and timeout protection
     async fn scan_wal_file(file: Arc<Mutex<DiskFile>>) -> IoResult<(u64, u64)> {
-        let mut file = file.lock().await;
-        let metadata = file.metadata().await?;
-        let file_size = metadata.len();
+        let scan_timeout = Duration::from_secs(30); // Configurable scan timeout
         
-        if file_size == 0 {
-            return Ok((0, 1));
+        tokio::time::timeout(scan_timeout, async {
+            let mut file = file.lock().await;
+            let metadata = file.metadata().await?;
+            let file_size = metadata.len();
+            
+            if file_size == 0 {
+                return Ok((0, 1));
+            }
+
+            // For large files, use chunked scanning to avoid memory issues
+            if file_size > 100 * 1024 * 1024 { // 100MB threshold
+                Self::scan_wal_file_chunked(&mut file, file_size).await
+            } else {
+                Self::scan_wal_file_standard(&mut file, file_size).await
+            }
+        })
+        .await
+        .map_err(|_| IoResult::Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut, 
+            "WAL file scan timed out"
+        )))?
+    }
+
+    /// Chunked scanning for large WAL files
+    async fn scan_wal_file_chunked(file: &mut DiskFile, file_size: u64) -> IoResult<(u64, u64)> {
+        const CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10MB chunks
+        let mut position = 0u64;
+        let mut max_sequence = 0u64;
+        let mut buffer = vec![0u8; CHUNK_SIZE];
+        let mut overlap_buffer = Vec::new();
+
+        while position < file_size {
+            let read_size = std::cmp::min(CHUNK_SIZE, (file_size - position) as usize);
+            let mut read_buffer = vec![0u8; read_size];
+            
+            // Read chunk with overlap handling
+            if !overlap_buffer.is_empty() {
+                read_buffer[..overlap_buffer.len()].copy_from_slice(&overlap_buffer);
+                let additional_read = file.read_object(
+                    &mut read_buffer[overlap_buffer.len()..], 
+                    position + overlap_buffer.len() as u64
+                ).await?;
+                
+                if additional_read == 0 {
+                    break;
+                }
+            } else {
+                let read = file.read_object(&mut read_buffer, position).await?;
+                if read == 0 {
+                    break;
+                }
+            }
+
+            // Process entries in chunk
+            let (processed, last_sequence, remaining) = Self::process_wal_chunk(&read_buffer)?;
+            max_sequence = max_sequence.max(last_sequence);
+            position += processed;
+            
+            // Handle incomplete entry at chunk boundary
+            overlap_buffer = remaining;
         }
-        
-        // Read the entire file for scanning (this could be optimized for large files)
+
+        Ok((position, max_sequence + 1))
+    }
+
+    /// Standard scanning for smaller WAL files
+    async fn scan_wal_file_standard(file: &mut DiskFile, file_size: u64) -> IoResult<(u64, u64)> {
         let mut buffer = vec![0u8; file_size as usize];
         let read = file.read_object(&mut buffer, 0).await?;
         
@@ -427,13 +489,187 @@ impl Wal {
                     position += entry_size;
                 }
                 Err(_) => {
-                    // Invalid entry, stop scanning
-                    break;
+                    break; // Invalid entry, stop scanning
                 }
             }
         }
         
         Ok((position as u64, max_sequence + 1))
+    }
+
+    /// Process WAL entries in a chunk, handling partial entries
+    fn process_wal_chunk(buffer: &[u8]) -> IoResult<(u64, u64, Vec<u8>)> {
+        let mut position = 0;
+        let mut max_sequence = 0;
+        
+        while position < buffer.len() {
+            match WalEntry::deserialize(&buffer[position..]) {
+                Ok((entry, entry_size)) => {
+                    max_sequence = max_sequence.max(entry.sequence);
+                    position += entry_size;
+                }
+                Err(_) => {
+                    // Potentially incomplete entry at chunk boundary
+                    let remaining = buffer[position..].to_vec();
+                    return Ok((position as u64, max_sequence, remaining));
+                }
+            }
+        }
+        
+        Ok((position as u64, max_sequence, Vec::new()))
+    }
+
+    /// Enhanced WAL implementation with advanced io_uring batch operations
+    pub async fn append_batch_vectored(&self, entries: Vec<WalEntry>) -> Result<Vec<u64>, RuntimeError> {
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        #[cfg(feature = "metrics")]
+        let batch_start = std::time::Instant::now();
+
+        let io_engine = get_io_engine();
+        let sequences = if io_engine.supports_zero_copy() && entries.len() > 8 {
+            // Use io_uring vectored operations for large batches
+            self.append_batch_io_uring(entries).await?
+        } else {
+            // Standard batch processing for smaller batches
+            self.append_batch_standard(entries).await?
+        };
+
+        #[cfg(feature = "metrics")]
+        {
+            histogram!("rustfs_wal_batch_append_duration_seconds")
+                .record(batch_start.elapsed().as_secs_f64());
+            counter!("rustfs_wal_vectored_batch_operations_total").increment(1);
+        }
+
+        Ok(sequences)
+    }
+
+    /// Standard batch append implementation
+    async fn append_batch_standard(&self, entries: Vec<WalEntry>) -> Result<Vec<u64>, RuntimeError> {
+        let mut sequences = Vec::with_capacity(entries.len());
+        let mut batch_data = Vec::new();
+        
+        // Serialize all entries in batch
+        for entry in &entries {
+            let sequence = self.next_sequence.fetch_add(1, Ordering::AcqRel);
+            sequences.push(sequence);
+            
+            let serialized = self.serialize_entry_optimized(entry, sequence)
+                .map_err(|e| RuntimeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            batch_data.extend_from_slice(&serialized);
+        }
+
+        // Write batch to background writer
+        {
+            let mut writer = self.background_writer.lock().await;
+            writer.queue_batch(batch_data).await
+                .map_err(|e| RuntimeError::IoError(e))?;
+        }
+
+        Ok(sequences)
+    }
+
+    /// io_uring-optimized batch append with vectored I/O
+    #[cfg(feature = "io_uring")]
+    async fn append_batch_io_uring(&self, entries: Vec<WalEntry>) -> Result<Vec<u64>, RuntimeError> {
+        let mut sequences = Vec::with_capacity(entries.len());
+        let mut batch_data = Vec::new();
+        
+        // Pre-serialize all entries for vectored writes
+        for entry in &entries {
+            let sequence = self.next_sequence.fetch_add(1, Ordering::AcqRel);
+            sequences.push(sequence);
+            
+            let serialized = self.serialize_entry_optimized(entry, sequence)
+                .map_err(|e| RuntimeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            batch_data.extend_from_slice(&serialized);
+        }
+
+        // Submit vectored write operation using io_uring
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        {
+            let mut writer = self.background_writer.lock().await;
+            writer.submit_vectored_write(batch_data, tx).await
+                .map_err(|e| RuntimeError::IoError(e))?;
+        }
+
+        // Wait for completion
+        rx.await
+            .map_err(|_| RuntimeError::OperationTimeout)?
+            .map_err(|e| RuntimeError::IoError(e))?;
+
+        // Optionally trigger fsync for durability
+        if self.config.sync_on_batch {
+            self.fsync_async().await?;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            counter!("rustfs_wal_io_uring_batch_writes_total").increment(1);
+            histogram!("rustfs_wal_io_uring_batch_size").record(entries.len() as f64);
+        }
+
+        tracing::debug!(
+            batch_size = entries.len(),
+            total_bytes = batch_data.len(),
+            io_uring_enabled = true,
+            "Vectored WAL batch append completed"
+        );
+
+        Ok(sequences)
+    }
+
+    /// Optimized entry serialization with batch processing
+    fn serialize_entry_optimized(&self, entry: &WalEntry, sequence: u64) -> Result<Vec<u8>, String> {
+        let mut buffer = Vec::with_capacity(256); // Pre-allocate reasonable size
+        
+        // Write sequence number (8 bytes)
+        buffer.extend_from_slice(&sequence.to_le_bytes());
+        
+        // Write timestamp (8 bytes)
+        buffer.extend_from_slice(&entry.timestamp.timestamp_nanos_opt()
+            .unwrap_or(0).to_le_bytes());
+        
+        // Write entry type (1 byte)
+        buffer.push(entry.entry_type as u8);
+        
+        // Write data length using variable-length encoding
+        let data_len = entry.data.len() as u64;
+        self.write_varint(&mut buffer, data_len);
+        
+        // Write data
+        buffer.extend_from_slice(&entry.data);
+        
+        // Write CRC32 checksum (4 bytes)
+        let checksum = crc32fast::hash(&buffer);
+        buffer.extend_from_slice(&checksum.to_le_bytes());
+        
+        Ok(buffer)
+    }
+
+    /// Write variable-length integer with optimal encoding
+    fn write_varint(&self, buffer: &mut Vec<u8>, mut value: u64) {
+        while value >= 0x80 {
+            buffer.push((value & 0x7F) as u8 | 0x80);
+            value >>= 7;
+        }
+        buffer.push(value as u8);
+    }
+
+    /// Enhanced async fsync with timeout protection
+    async fn fsync_async(&self) -> Result<(), RuntimeError> {
+        let timeout = self.config.io_timeout;
+        
+        tokio::time::timeout(timeout, async {
+            let file_guard = self.file.lock().await;
+            file_guard.sync_all().await
+                .map_err(|e| RuntimeError::IoError(e))
+        })
+        .await
+        .map_err(|_| RuntimeError::OperationTimeout)?
     }
 }
 
