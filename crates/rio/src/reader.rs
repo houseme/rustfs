@@ -20,7 +20,7 @@ use crate::compress_index::TryGetIndex;
 use crate::{EtagResolvable, HashReaderDetector};
 
 /// Base trait for all reader types in the RustFS Rio framework
-pub trait Reader: AsyncRead + Unpin + Send + Sync {}
+pub trait Reader: AsyncRead + Unpin + Send + Sync + HashReaderDetector + TryGetIndex + EtagResolvable {}
 
 pub struct WarpReader<R> {
     inner: R,

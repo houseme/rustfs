@@ -381,7 +381,7 @@ impl AsyncRead for HttpReader {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         let mut this = self.project();
         
-        let original_filled = buf.filled().len();
+        let _original_filled = buf.filled().len();
         
         let poll_result = this.inner.as_mut().poll_read(cx, buf);
         

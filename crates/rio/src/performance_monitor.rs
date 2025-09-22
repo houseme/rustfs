@@ -291,7 +291,7 @@ impl AdvancedPerformanceMonitor {
 
         // Add to history
         let mut history = self.historical_data.lock().await;
-        history.push_back(stats);
+        history.push_back(stats.clone());
 
         // Trim old data
         let cutoff_time = SystemTime::now()
@@ -593,7 +593,9 @@ impl PatternAnalyzer {
 
         // Update prediction model
         if history.len() >= 10 {
-            self.update_prediction_model(metric_name, history);
+            let history_clone = history.clone();
+            drop(history); // Release the borrow before calling update_prediction_model
+            self.update_prediction_model(metric_name, &history_clone);
         }
     }
 

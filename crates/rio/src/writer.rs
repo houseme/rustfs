@@ -12,12 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::Cursor;
+use std::io::{Cursor, Result as IoResult};
 use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::io::AsyncWrite;
 
-// HttpWriter will be defined later - using placeholder for now
-pub struct HttpWriter;
+// HttpWriter placeholder implementation with AsyncWrite trait
+pub struct HttpWriter {
+    buffer: Vec<u8>,
+}
+
+impl HttpWriter {
+    pub fn new() -> Self {
+        Self {
+            buffer: Vec::new(),
+        }
+    }
+}
+
+impl Default for HttpWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AsyncWrite for HttpWriter {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<IoResult<usize>> {
+        self.buffer.extend_from_slice(buf);
+        Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<IoResult<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
 
 pub enum Writer {
     Cursor(Cursor<Vec<u8>>),

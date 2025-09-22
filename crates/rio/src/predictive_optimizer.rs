@@ -436,7 +436,7 @@ impl PredictiveOptimizer {
     /// Start pattern detection background task
     fn start_pattern_detection(&self) {
         let patterns = Arc::clone(&self.access_patterns);
-        let config = self.config.clone();
+        let _config = self.config.clone();
 
         tokio::spawn(async move {
             let mut detection_interval = interval(Duration::from_secs(60));
@@ -466,7 +466,7 @@ impl PredictiveOptimizer {
 
     /// Start parameter optimization background task
     fn start_parameter_optimization(&self) {
-        let current_parameters = Arc::clone(&self.current_parameters);
+        let _current_parameters = Arc::clone(&self.current_parameters);
         let optimization_history = Arc::clone(&self.optimization_history);
         let config = self.config.clone();
 
@@ -513,27 +513,29 @@ impl PredictiveOptimizer {
             loop {
                 training_interval.tick().await;
                 
-                let feedback = performance_feedback.lock().await;
-                if feedback.len() < config.min_samples_for_prediction {
-                    continue;
-                }
+                let feedback_samples = {
+                    let feedback = performance_feedback.lock().await;
+                    if feedback.len() < config.min_samples_for_prediction {
+                        continue;
+                    }
+                    feedback.clone() // Clone the data to avoid borrowing issues
+                };
 
                 // Group feedback by operation type
-                let mut grouped_feedback: HashMap<String, Vec<&PerformanceSample>> = HashMap::new();
-                for sample in feedback.iter() {
+                let mut grouped_feedback: HashMap<String, Vec<PerformanceSample>> = HashMap::new();
+                for sample in feedback_samples {
                     grouped_feedback
                         .entry(sample.operation_type.clone())
                         .or_default()
                         .push(sample);
                 }
 
-                drop(feedback);
-
                 // Train models for each operation type
                 let mut models = prediction_models.lock().await;
                 for (operation_type, samples) in grouped_feedback {
                     if samples.len() >= config.min_samples_for_prediction {
-                        let model = Self::train_prediction_model(&samples);
+                        let sample_refs: Vec<&PerformanceSample> = samples.iter().collect();
+                        let model = Self::train_prediction_model(&sample_refs);
                         models.insert(operation_type, model);
                     }
                 }

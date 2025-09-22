@@ -340,7 +340,7 @@ where
 
 impl<R> HashReaderDetector for CompressReader<R>
 where
-    R: AsyncRead + Unpin + Send + Sync,
+    R: AsyncRead + Unpin + Send + Sync + HashReaderDetector,
 {
     fn is_hash_reader(&self) -> bool {
         self.inner.is_hash_reader()

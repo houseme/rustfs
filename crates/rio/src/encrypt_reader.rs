@@ -140,7 +140,8 @@ where
         #[cfg(feature = "metrics")]
         let start = std::time::Instant::now();
 
-        let io_engine = get_io_engine();
+        let io_engine = get_io_engine()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         
         // Use io_uring batch operations for large blocks
         let encrypted_data = if io_engine.supports_zero_copy() && data.len() > ENCRYPTION_BLOCK_SIZE * 2 {
@@ -174,6 +175,59 @@ where
         );
 
         Ok(encrypted_data)
+    }
+
+    /// Create end marker for the encrypted stream (static version for projection)
+    fn create_end_marker(key: &[u8; 32], nonce: &[u8; 12]) -> Vec<u8> {
+        let end_marker = b"END_MARKER";
+        let cipher = match Aes256Gcm::new_from_slice(key) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        
+        let mut end_nonce = *nonce;
+        end_nonce[0..8].copy_from_slice(b"ENDMARK!");
+        let nonce = Nonce::from_slice(&end_nonce);
+        
+        match cipher.encrypt(nonce, end_marker.as_ref()) {
+            Ok(encrypted) => encrypted,
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Encrypt block of data (static version for projection)
+    fn encrypt_block_static(key: &[u8; 32], nonce: &[u8; 12], data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+        let cipher = Aes256Gcm::new_from_slice(key)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        
+        let nonce = Nonce::from_slice(nonce);
+        cipher.encrypt(nonce, data.as_ref())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+
+    /// Write end marker for the encrypted stream
+    fn write_end_marker(&self) -> Vec<u8> {
+        // Create end marker with special nonce pattern
+        let end_marker = b"END_MARKER";
+        let cipher = match Aes256Gcm::new_from_slice(&self.key) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        
+        let mut end_nonce = self.nonce;
+        end_nonce[0..8].copy_from_slice(b"ENDMARK!");
+        let nonce = Nonce::from_slice(&end_nonce);
+        
+        match cipher.encrypt(nonce, end_marker.as_ref()) {
+            Ok(encrypted) => encrypted,
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Batch encrypt a block of data
+    fn batch_encrypt_block(&mut self, data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+        self.encrypt_standard(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 
     /// Zero-copy vectored encryption using io_uring
@@ -277,56 +331,54 @@ where
             buffer_len = this.buffer.len()
         );
 
-        async move {
-            #[cfg(feature = "metrics")]
-            let start = std::time::Instant::now();
+        #[cfg(feature = "metrics")]
+        let start = std::time::Instant::now();
 
-            // Read a block from inner reader
-            let mut temp = vec![0u8; ENCRYPTION_BLOCK_SIZE];
-            let mut temp_buf = ReadBuf::new(&mut temp);
-            
-            match this.inner.as_mut().poll_read(cx, &mut temp_buf) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Ok(())) => {
-                    let n = temp_buf.filled().len();
+        // Read a block from inner reader
+        let mut temp = vec![0u8; ENCRYPTION_BLOCK_SIZE];
+        let mut temp_buf = ReadBuf::new(&mut temp);
+        
+        match this.inner.as_mut().poll_read(cx, &mut temp_buf) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(())) => {
+                let n = temp_buf.filled().len();
+                
+                if n == 0 {
+                    // EOF, write end marker  
+                    let end_marker = Self::create_end_marker(&this.key, &this.nonce);
+                    *this.buffer = end_marker;
+                    *this.buffer_pos = 0;
+                    *this.finished = true;
                     
-                    if n == 0 {
-                        // EOF, write end marker
-                        *this.buffer = this.write_end_marker();
-                        *this.buffer_pos = 0;
-                        *this.finished = true;
-                        
-                        let to_copy = std::cmp::min(buf.remaining(), this.buffer.len());
-                        buf.put_slice(&this.buffer[..to_copy]);
-                        *this.buffer_pos += to_copy;
-                        
-                        Poll::Ready(Ok(()))
-                    } else {
-                        // Encrypt the chunk with batch optimization
-                        match this.batch_encrypt_block(&temp_buf.filled()) {
-                            Ok(encrypted_data) => {
-                                *this.buffer = encrypted_data;
-                                *this.buffer_pos = 0;
-                                
-                                let to_copy = std::cmp::min(buf.remaining(), this.buffer.len());
-                                buf.put_slice(&this.buffer[..to_copy]);
-                                *this.buffer_pos += to_copy;
-                                
-                                #[cfg(feature = "metrics")]
-                                histogram!("rustfs_encrypt_reader_poll_read_duration_seconds")
-                                    .record(start.elapsed().as_secs_f64());
-                                
-                                Poll::Ready(Ok(()))
-                            }
-                            Err(e) => Poll::Ready(Err(e)),
+                    let to_copy = std::cmp::min(buf.remaining(), this.buffer.len());
+                    buf.put_slice(&this.buffer[..to_copy]);
+                    *this.buffer_pos += to_copy;
+                    
+                    Poll::Ready(Ok(()))
+                } else {
+                    // Encrypt the chunk with batch optimization
+                    let encrypted_data = Self::encrypt_block_static(&this.key, &this.nonce, &temp_buf.filled());
+                    match encrypted_data {
+                        Ok(encrypted_data) => {
+                            *this.buffer = encrypted_data;
+                            *this.buffer_pos = 0;
+                            
+                            let to_copy = std::cmp::min(buf.remaining(), this.buffer.len());
+                            buf.put_slice(&this.buffer[..to_copy]);
+                            *this.buffer_pos += to_copy;
+                            
+                            #[cfg(feature = "metrics")]
+                            histogram!("rustfs_encrypt_reader_poll_read_duration_seconds")
+                                .record(start.elapsed().as_secs_f64());
+                            
+                            Poll::Ready(Ok(()))
                         }
+                        Err(e) => Poll::Ready(Err(e)),
                     }
                 }
-                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
         }
-        .instrument(span)
-        .in_current_span()
     }
 }
 
@@ -341,7 +393,7 @@ where
 
 impl<R> HashReaderDetector for EncryptReader<R>
 where
-    R: AsyncRead + Unpin + Send + Sync,
+    R: AsyncRead + Unpin + Send + Sync + HashReaderDetector,
 {
     fn is_hash_reader(&self) -> bool {
         self.inner.is_hash_reader()
@@ -354,7 +406,7 @@ where
 
 impl<R> TryGetIndex for EncryptReader<R>
 where
-    R: AsyncRead + Unpin + Send + Sync,
+    R: AsyncRead + Unpin + Send + Sync + TryGetIndex,
 {
     fn try_get_index(&self) -> Option<&Index> {
         self.inner.try_get_index()
