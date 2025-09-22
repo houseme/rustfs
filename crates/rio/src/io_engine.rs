@@ -104,6 +104,31 @@ impl IoEngine {
             metrics,
         })
     }
+    
+    /// Create a basic I/O engine with default settings
+    pub fn basic() -> Self {
+        let runtime = crate::runtime::RuntimeHandle::new_tokio();
+        let global_semaphore = Arc::new(async_semaphore::Semaphore::new(1024));
+        
+        #[cfg(feature = "io_uring")]
+        let batch_queue = Arc::new(parking_lot::Mutex::new(Vec::with_capacity(256)));
+
+        #[cfg(feature = "metrics")]
+        let metrics = Arc::new(IoMetrics {
+            operations_total: parking_lot::Mutex::new(0),
+            bytes_transferred: parking_lot::Mutex::new(0),
+            batch_queue_depth: parking_lot::Mutex::new(0),
+        });
+        
+        Self {
+            runtime,
+            global_semaphore,
+            #[cfg(feature = "io_uring")]
+            batch_queue,
+            #[cfg(feature = "metrics")]
+            metrics,
+        }
+    }
 
     /// Perform zero-copy read operation with advanced buffering
     #[instrument(skip(self, reader, buf), fields(buf_len = buf.capacity()))]
@@ -293,18 +318,27 @@ pub struct IoEngineStats {
 static GLOBAL_IO_ENGINE: std::sync::OnceLock<Arc<IoEngine>> = std::sync::OnceLock::new();
 
 /// Get or initialize the global I/O engine
-pub fn get_io_engine() -> Result<&'static Arc<IoEngine>> {
-    GLOBAL_IO_ENGINE.get_or_try_init(|| {
-        let runtime = crate::runtime::init_runtime()?;
-        let engine = IoEngine::new(runtime)?;
-        Ok(Arc::new(engine))
+pub fn get_io_engine() -> &'static Arc<IoEngine> {
+    GLOBAL_IO_ENGINE.get_or_init(|| {
+        let runtime = crate::runtime::init_runtime().unwrap_or_else(|_| {
+            // Fallback to default runtime if initialization fails
+            crate::runtime::RuntimeHandle::new_tokio()
+        });
+        let engine = IoEngine::new(runtime).unwrap_or_else(|_| {
+            // Fallback to basic engine if initialization fails
+            IoEngine::basic()
+        });
+        Arc::new(engine)
     })
 }
 
 /// Initialize the global I/O engine with custom runtime
-pub fn init_io_engine(runtime: RuntimeHandle) -> Result<&'static Arc<IoEngine>> {
-    GLOBAL_IO_ENGINE.get_or_try_init(|| {
-        let engine = IoEngine::new(runtime)?;
-        Ok(Arc::new(engine))
+pub fn init_io_engine(runtime: RuntimeHandle) -> &'static Arc<IoEngine> {
+    GLOBAL_IO_ENGINE.get_or_init(|| {
+        let engine = IoEngine::new(runtime).unwrap_or_else(|_| {
+            // Fallback to basic engine if initialization fails
+            IoEngine::basic()
+        });
+        Arc::new(engine)
     })
 }

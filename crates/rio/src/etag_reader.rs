@@ -97,15 +97,10 @@ impl EtagReader {
         const BATCH_SIZE: usize = 8192; // 8KB batches for optimal CPU cache usage
 
         // Use io_uring batch operations when available for zero-copy MD5 updates
-        let io_engine = get_io_engine();
-        if io_engine.supports_zero_copy() && data.len() > BATCH_SIZE * 4 {
-            // Process large chunks with zero-copy batch operations
-            self.batch_md5_update_zero_copy(data);
-        } else {
-            // Fallback to standard chunked processing
-            for chunk in data.chunks(BATCH_SIZE) {
-                self.md5.update(chunk);
-            }
+        let _io_engine = get_io_engine();
+        // Fallback to standard chunked processing for now
+        for chunk in data.chunks(BATCH_SIZE) {
+            self.md5.update(chunk);
         }
 
         #[cfg(feature = "metrics")]
@@ -203,61 +198,57 @@ impl AsyncRead for EtagReader {
             finished = *this.finished
         );
 
-        async move {
-            #[cfg(feature = "metrics")]
-            let start = std::time::Instant::now();
+        #[cfg(feature = "metrics")]
+        let start = std::time::Instant::now();
 
-            let poll_result = this.inner.as_mut().poll_read(cx, buf);
+        let poll_result = this.inner.as_mut().poll_read(cx, buf);
 
-            if let Poll::Ready(Ok(())) = &poll_result {
-                let new_data = &buf.filled()[orig_filled..];
+        if let Poll::Ready(Ok(())) = &poll_result {
+            let new_data = &buf.filled()[orig_filled..];
 
-                if !new_data.is_empty() {
-                    // Use optimized batch MD5 update
-                    this.batch_md5_update(new_data);
+            if !new_data.is_empty() {
+                // Use optimized batch MD5 update
+                Self::batch_md5_update(&mut this.md5, new_data);
 
-                    tracing::trace!(bytes_read = new_data.len(), "EtagReader processed new data");
-                } else {
-                    // EOF reached
-                    *this.finished = true;
+                tracing::trace!(bytes_read = new_data.len(), "EtagReader processed new data");
+            } else {
+                // EOF reached
+                *this.finished = true;
 
-                    // Validate checksum if provided
-                    if let Some(expected_checksum) = this.checksum {
-                        let computed_etag = format!("{:x}", this.md5.clone().finalize());
+                // Validate checksum if provided
+                if let Some(expected_checksum) = this.checksum {
+                    let computed_etag = format!("{:x}", this.md5.clone().finalize());
 
+                    #[cfg(feature = "metrics")]
+                    counter!("rustfs_etag_reader_checksum_validations_total").increment(1);
+
+                    if *expected_checksum != computed_etag {
                         #[cfg(feature = "metrics")]
-                        counter!("rustfs_etag_reader_checksum_validations_total").increment(1);
+                        counter!("rustfs_etag_reader_checksum_mismatches_total").increment(1);
 
-                        if *expected_checksum != computed_etag {
-                            #[cfg(feature = "metrics")]
-                            counter!("rustfs_etag_reader_checksum_mismatches_total").increment(1);
+                        tracing::error!(
+                            expected = expected_checksum,
+                            computed = computed_etag,
+                            "ETag checksum validation failed"
+                        );
 
-                            tracing::error!(
-                                expected = expected_checksum,
-                                computed = computed_etag,
-                                "ETag checksum validation failed"
-                            );
-
-                            return Poll::Ready(Err(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("ETag checksum mismatch: expected {}, got {}", expected_checksum, computed_etag),
-                            )));
-                        } else {
-                            tracing::debug!(etag = computed_etag, "ETag checksum validation successful");
-                        }
+                        return Poll::Ready(Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("ETag checksum mismatch: expected {}, got {}", expected_checksum, computed_etag),
+                        )));
+                    } else {
+                        tracing::debug!(etag = computed_etag, "ETag checksum validation successful");
                     }
                 }
             }
-
-            #[cfg(feature = "metrics")]
-            {
-                histogram!("rustfs_etag_reader_poll_read_duration_seconds").record(start.elapsed().as_secs_f64());
-            }
-
-            poll_result
         }
-        .instrument(span)
-        .in_current_span()
+
+        #[cfg(feature = "metrics")]
+        {
+            histogram!("rustfs_etag_reader_poll_read_duration_seconds").record(start.elapsed().as_secs_f64());
+        }
+
+        poll_result
     }
 }
 

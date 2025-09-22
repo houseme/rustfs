@@ -134,7 +134,9 @@ where
         #[cfg(feature = "metrics")]
         let start = std::time::Instant::now();
 
-        let result = compress_block(data, self.compression_algorithm)?;
+        let result = match compress_block(data, self.compression_algorithm) {
+            compressed => compressed,
+        };
 
         #[cfg(feature = "metrics")]
         {
@@ -230,7 +232,7 @@ where
                         // EOF - process what we have
                     } else {
                         this.temp_buffer.extend_from_slice(&temp_buf.filled());
-                        return self.poll_read_with_batch_optimization(cx, buf); // Try again
+                        return this.poll_read(cx, buf); // Try again
                     }
                 }
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
@@ -259,7 +261,7 @@ where
         }
 
         // Compress the block with batch optimization
-        let compressed = match Self::batch_compress_block_static(&this.temp_buffer, this.compression_algorithm) {
+        let compressed = match Self::batch_compress_block_static(&this.temp_buffer, *this.compression_algorithm) {
             Ok(data) => data,
             Err(e) => return Poll::Ready(Err(e)),
         };
@@ -325,7 +327,7 @@ where
         if data.is_empty() {
             return Ok(Vec::new());
         }
-        compress_block(data, algorithm)
+        Ok(compress_block(data, algorithm))
     }
 }
 

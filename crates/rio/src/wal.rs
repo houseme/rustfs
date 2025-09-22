@@ -58,13 +58,6 @@ impl WalEntry {
             entry_type: 0, // Default entry type
         }
     }
-    pub fn new(sequence: u64, data: Bytes) -> Self {
-        Self {
-            sequence,
-            data,
-            timestamp: std::time::SystemTime::now(),
-        }
-    }
 
     /// Serialize the entry for storage
     pub fn serialize(&self) -> Bytes {
@@ -106,6 +99,7 @@ impl WalEntry {
             sequence,
             data: entry_data,
             timestamp,
+            entry_type: 0, // Default entry type
         };
 
         Ok((entry, 20 + data_len))

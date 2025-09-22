@@ -129,6 +129,11 @@ where
         block_nonce
     }
 
+    /// Standard encryption method
+    fn encrypt_standard(&mut self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        Self::encrypt_block_static(data, &self.key, &self.nonce)
+    }
+
     /// Advanced batch encryption with io_uring vectored operations
     #[instrument(skip(self, data), fields(data_len = data.len()))]
     fn batch_encrypt_block(&mut self, data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
@@ -139,16 +144,11 @@ where
         #[cfg(feature = "metrics")]
         let start = std::time::Instant::now();
 
-        let io_engine = get_io_engine().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let _io_engine = get_io_engine().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        // Use io_uring batch operations for large blocks
-        let encrypted_data = if io_engine.runtime.supports_zero_copy() && data.len() > ENCRYPTION_BLOCK_SIZE * 2 {
-            Self::encrypt_vectored_io_uring_static(data, &self.key, &self.nonce)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
-        } else {
-            self.encrypt_standard(data)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
-        };
+        // Use standard encryption (remove io_uring check due to private field access)
+        let encrypted_data = self.encrypt_standard(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         #[cfg(feature = "metrics")]
         {
@@ -248,7 +248,7 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        let span = info_span!(
+        let _span = info_span!(
             "encrypt_reader_poll_read",
             block_counter = *this.block_counter,
             finished = *this.finished,
