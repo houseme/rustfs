@@ -497,8 +497,8 @@ impl Wal {
         #[cfg(feature = "metrics")]
         let batch_start = std::time::Instant::now();
 
-        let io_engine = get_io_engine().map_err(|e| RuntimeError::IoError(e.to_string()))?;
-        let sequences = if false && entries.len() > 8 { // TODO: implement io_uring check
+        let sequences = if false && entries.len() > 8 {
+            // TODO: implement io_uring check
             // Use io_uring vectored operations for large batches
             self.append_batch_standard(entries).await? // TODO: implement io_uring version
         } else {
@@ -539,7 +539,8 @@ impl Wal {
         // Write batch to file directly (simplified approach)
         {
             let mut file = self.file.lock().await;
-            file.write_object(&batch_data, 0).await
+            file.write_object(&batch_data, 0)
+                .await
                 .map_err(|e| RuntimeError::IoError(e.to_string()))?;
         }
 

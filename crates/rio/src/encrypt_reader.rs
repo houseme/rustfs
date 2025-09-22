@@ -20,7 +20,6 @@ use crate::{EtagResolvable, Reader};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use pin_project_lite::pin_project;
-use rustfs_utils::put_uvarint;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
@@ -221,7 +220,6 @@ where
             Err(_) => Vec::new(),
         }
     }
-
 }
 
 impl<R> AsyncRead for EncryptReader<R>

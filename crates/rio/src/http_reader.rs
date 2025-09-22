@@ -118,7 +118,8 @@ impl HttpReader {
         // Configure streaming with adaptive buffering
         let buffer_size = if capacity > 0 {
             capacity
-        } else if false { // TODO: implement io_uring check
+        } else if false {
+            // TODO: implement io_uring check
             256 * 1024 // 256KB for io_uring optimization
         } else {
             128 * 1024 // 128KB for standard operations

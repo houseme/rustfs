@@ -287,9 +287,7 @@ where
         *this.pos = 0;
 
         // Update index for seeking support
-        let _ = this
-            .index
-            .add(*this.written as i64, *this.uncomp_written as i64);
+        let _ = this.index.add(*this.written as i64, *this.uncomp_written as i64);
         *this.written += this.buffer.len();
         *this.uncomp_written += original_len;
 
