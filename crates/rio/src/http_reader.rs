@@ -29,11 +29,11 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_util::io::StreamReader;
 use tracing::{info_span, instrument, Instrument};
 
+use crate::io_engine::get_io_engine;
 use crate::{EtagResolvable, HashReaderDetector, HashReaderMut};
-use crate::io_engine::{get_io_engine};
 
 #[cfg(feature = "metrics")]
-use metrics::{counter, histogram, gauge};
+use metrics::{counter, gauge, histogram};
 
 /// Enhanced HTTP client with connection pooling and performance optimization
 fn get_optimized_http_client() -> Client {
@@ -71,7 +71,7 @@ macro_rules! http_log {
 
 pin_project! {
     /// Enhanced HttpReader with advanced connection management and io_uring integration
-    /// 
+    ///
     /// This reader provides high-performance HTTP streaming with connection pooling,
     /// adaptive flow control, and comprehensive monitoring for distributed object storage.
     pub struct HttpReader {
@@ -92,24 +92,24 @@ impl HttpReader {
     /// Create HttpReader with enhanced buffering and io_uring optimization
     #[instrument(skip(headers, body), fields(url = %url, method = ?method, capacity))]
     pub async fn with_capacity(
-        url: String, 
-        method: Method, 
-        headers: HeaderMap, 
+        url: String,
+        method: Method,
+        headers: HeaderMap,
         body: Option<Vec<u8>>,
-        capacity: usize
+        capacity: usize,
     ) -> io::Result<Self> {
         #[cfg(feature = "metrics")]
         let request_start = std::time::Instant::now();
-        
+
         let client = get_optimized_http_client();
         let io_engine = get_io_engine();
-        
+
         // Build request with optimizations
         let mut req_builder = client.request(method.clone(), &url);
-        
+
         // Apply headers
         req_builder = req_builder.headers(headers.clone());
-        
+
         // Configure body if present
         if let Some(body_data) = body {
             req_builder = req_builder.body(body_data);
@@ -139,7 +139,9 @@ impl HttpReader {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
         // Check if connection was reused
-        let connection_reused = response.extensions().get::<reqwest::tls::TlsInfo>()
+        let connection_reused = response
+            .extensions()
+            .get::<reqwest::tls::TlsInfo>()
             .map(|tls| tls.server_cert_fingerprint().is_some())
             .unwrap_or(false);
 
@@ -147,17 +149,15 @@ impl HttpReader {
         if !status.is_success() {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("HTTP request failed with status: {}", status)
+                format!("HTTP request failed with status: {}", status),
             ));
         }
 
         // Create adaptive stream with optimized buffering
-        let stream = response.bytes_stream()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+        let stream = response.bytes_stream().map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
         // Wrap stream with enhanced buffering
-        let boxed_stream: Pin<Box<dyn Stream<Item=std::io::Result<Bytes>>+Send+Sync>> = 
-            Box::pin(stream);
+        let boxed_stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync>> = Box::pin(stream);
         let stream_reader = StreamReader::with_capacity(boxed_stream, buffer_size);
 
         #[cfg(feature = "metrics")]
@@ -166,8 +166,7 @@ impl HttpReader {
             if connection_reused {
                 counter!("rustfs_http_reader_connections_reused_total").increment(1);
             }
-            histogram!("rustfs_http_reader_request_setup_duration_seconds")
-                .record(request_start.elapsed().as_secs_f64());
+            histogram!("rustfs_http_reader_request_setup_duration_seconds").record(request_start.elapsed().as_secs_f64());
         }
 
         Ok(Self {
@@ -185,10 +184,10 @@ impl HttpReader {
     /// Create HttpReader with advanced streaming optimizations for large files
     #[instrument(skip(headers, body), fields(url = %url, method = ?method))]
     pub async fn with_streaming_optimization(
-        url: String, 
-        method: Method, 
-        headers: HeaderMap, 
-        body: Option<Vec<u8>>
+        url: String,
+        method: Method,
+        headers: HeaderMap,
+        body: Option<Vec<u8>>,
     ) -> io::Result<Self> {
         // Use larger buffer for streaming workloads
         const STREAMING_BUFFER_SIZE: usize = 1024 * 1024; // 1MB buffer
@@ -214,39 +213,36 @@ impl HttpReader {
         async move {
             #[cfg(feature = "metrics")]
             let start_time = std::time::Instant::now();
-            
+
             // Enhanced connection validation with HEAD request
             let client = get_optimized_http_client();
-            
+
             #[cfg(feature = "metrics")]
             counter!("rustfs_http_reader_head_requests_total").increment(1);
-            
+
             let head_resp = client.head(&url).headers(headers.clone()).send().await;
-            
+
             match head_resp {
                 Ok(resp) => {
                     http_log!("[HttpReader::new] HEAD status: {}", resp.status());
-                    
+
                     #[cfg(feature = "metrics")]
                     {
                         counter!("rustfs_http_reader_successful_head_requests_total").increment(1);
-                        histogram!("rustfs_http_reader_head_request_duration_seconds")
-                            .record(start_time.elapsed().as_secs_f64());
+                        histogram!("rustfs_http_reader_head_request_duration_seconds").record(start_time.elapsed().as_secs_f64());
                     }
-                    
+
                     if !resp.status().is_success() {
                         #[cfg(feature = "metrics")]
                         counter!("rustfs_http_reader_failed_head_requests_total").increment(1);
-                        
-                        return Err(Error::other(format!(
-                            "HEAD request failed: url: {}, status: {}", 
-                            url, resp.status()
-                        )));
+
+                        return Err(Error::other(format!("HEAD request failed: url: {}, status: {}", url, resp.status())));
                     }
-                    
+
                     // Log connection reuse information
                     #[cfg(feature = "metrics")]
-                    let connection_reused = resp.headers()
+                    let connection_reused = resp
+                        .headers()
                         .get("connection")
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_lowercase().contains("keep-alive"))
@@ -254,23 +250,17 @@ impl HttpReader {
                 }
                 Err(e) => {
                     http_log!("[HttpReader::new] HEAD error: {e}");
-                    
+
                     #[cfg(feature = "metrics")]
                     counter!("rustfs_http_reader_head_request_errors_total").increment(1);
-                    
-                    return Err(Error::other(
-                        e.source()
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| e.to_string())
-                    ));
+
+                    return Err(Error::other(e.source().map(|s| s.to_string()).unwrap_or_else(|| e.to_string())));
                 }
             }
 
             // Create the main request with enhanced configuration
             let client = get_optimized_http_client();
-            let mut request: RequestBuilder = client
-                .request(method.clone(), url.clone())
-                .headers(headers.clone());
+            let mut request: RequestBuilder = client.request(method.clone(), url.clone()).headers(headers.clone());
 
             if let Some(body) = body {
                 request = request.body(body);
@@ -278,31 +268,28 @@ impl HttpReader {
 
             #[cfg(feature = "metrics")]
             let request_start = std::time::Instant::now();
-            
+
             match request.send().await {
                 Ok(response) => {
                     http_log!("[HttpReader::new] Response status: {}", response.status());
-                    
+
                     #[cfg(feature = "metrics")]
                     {
                         counter!("rustfs_http_reader_successful_requests_total").increment(1);
                         histogram!("rustfs_http_reader_request_setup_duration_seconds")
                             .record(request_start.elapsed().as_secs_f64());
                     }
-                    
+
                     if !response.status().is_success() {
                         #[cfg(feature = "metrics")]
                         counter!("rustfs_http_reader_failed_requests_total").increment(1);
-                        
-                        return Err(Error::other(format!(
-                            "HTTP request failed: url: {}, status: {}",
-                            url, response.status()
-                        )));
+
+                        return Err(Error::other(format!("HTTP request failed: url: {}, status: {}", url, response.status())));
                     }
 
                     // Extract content length for buffer optimization
                     let content_length = response.content_length();
-                    
+
                     #[cfg(feature = "metrics")]
                     if let Some(length) = content_length {
                         gauge!("rustfs_http_reader_content_length_bytes").set(length as f64);
@@ -314,13 +301,12 @@ impl HttpReader {
                     let stream = response.bytes_stream().map_err(|e| {
                         #[cfg(feature = "metrics")]
                         counter!("rustfs_http_reader_stream_errors_total").increment(1);
-                        
+
                         std::io::Error::new(std::io::ErrorKind::Other, e)
                     });
 
-                    let boxed_stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync>> =
-                        Box::pin(stream);
-                    
+                    let boxed_stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync>> = Box::pin(stream);
+
                     let stream_reader = StreamReader::new(boxed_stream);
 
                     Ok(Self {
@@ -338,15 +324,11 @@ impl HttpReader {
                 }
                 Err(e) => {
                     http_log!("[HttpReader::new] Request error: {e}");
-                    
+
                     #[cfg(feature = "metrics")]
                     counter!("rustfs_http_reader_request_errors_total").increment(1);
-                    
-                    Err(Error::other(
-                        e.source()
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| e.to_string())
-                    ))
+
+                    Err(Error::other(e.source().map(|s| s.to_string()).unwrap_or_else(|| e.to_string())))
                 }
             }
         }
@@ -380,28 +362,27 @@ impl AsyncRead for HttpReader {
     #[instrument(skip(self, cx, buf), fields(buf_remaining = buf.remaining()))]
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         let mut this = self.project();
-        
+
         let _original_filled = buf.filled().len();
-        
+
         let poll_result = this.inner.as_mut().poll_read(cx, buf);
-        
+
         // Track bytes downloaded for metrics
         #[cfg(feature = "metrics")]
         if let Poll::Ready(Ok(())) = &poll_result {
             let bytes_read = buf.filled().len() - original_filled;
             if bytes_read > 0 {
                 *this.bytes_downloaded += bytes_read as u64;
-                
-                counter!("rustfs_http_reader_bytes_downloaded_total")
-                    .increment(bytes_read as u64);
-                
+
+                counter!("rustfs_http_reader_bytes_downloaded_total").increment(bytes_read as u64);
+
                 // Calculate and report download speed
                 let elapsed = this.request_start_time.elapsed();
                 if elapsed.as_secs() > 0 {
                     let speed_mbps = (*this.bytes_downloaded as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
                     gauge!("rustfs_http_reader_download_speed_mbps").set(speed_mbps);
                 }
-                
+
                 tracing::trace!(
                     bytes_read = bytes_read,
                     total_downloaded = *this.bytes_downloaded,
@@ -410,7 +391,7 @@ impl AsyncRead for HttpReader {
                 );
             }
         }
-        
+
         poll_result
     }
 }
@@ -418,10 +399,7 @@ impl AsyncRead for HttpReader {
 impl AsyncWrite for HttpReader {
     fn poll_write(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: &[u8]) -> Poll<io::Result<usize>> {
         // HttpReader is read-only
-        Poll::Ready(Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "HttpReader does not support writing"
-        )))
+        Poll::Ready(Err(io::Error::new(io::ErrorKind::Unsupported, "HttpReader does not support writing")))
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -449,106 +427,6 @@ impl HashReaderDetector for HttpReader {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::io::AsyncReadExt;
-    use tokio_test;
-
-    #[tokio::test]
-    #[ignore] // Requires internet connection
-    async fn test_http_reader_basic_functionality() {
-        let url = "https://httpbin.org/json".to_string();
-        let method = Method::GET;
-        let headers = HeaderMap::new();
-
-        let mut reader = HttpReader::new(url, method, headers, None).await.unwrap();
-        let mut result = Vec::new();
-
-        reader.read_to_end(&mut result).await.unwrap();
-
-        // Should have received some JSON data
-        assert!(!result.is_empty());
-        
-        // Should be valid UTF-8 (JSON)
-        let response_text = String::from_utf8(result).unwrap();
-        assert!(response_text.contains("\""));
-        
-        println!("Received response: {}", response_text);
-    }
-
-    #[tokio::test]
-    async fn test_http_reader_error_handling() {
-        let url = "https://nonexistent-domain-12345.com/test".to_string();
-        let method = Method::GET;
-        let headers = HeaderMap::new();
-
-        let result = HttpReader::new(url, method, headers, None).await;
-        
-        // Should fail with connection error
-        assert!(result.is_err());
-        
-        let error = result.unwrap_err();
-        println!("Expected error: {}", error);
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires internet connection
-    async fn test_http_reader_with_custom_headers() {
-        let url = "https://httpbin.org/headers".to_string();
-        let method = Method::GET;
-        
-        let mut headers = HeaderMap::new();
-        headers.insert("User-Agent", "RustFS-Rio/1.0".parse().unwrap());
-        headers.insert("Accept", "application/json".parse().unwrap());
-
-        let mut reader = HttpReader::new(url, method, headers, None).await.unwrap();
-        let mut result = Vec::new();
-
-        reader.read_to_end(&mut result).await.unwrap();
-
-        let response_text = String::from_utf8(result).unwrap();
-        
-        // Should contain our custom headers
-        assert!(response_text.contains("RustFS-Rio/1.0"));
-        assert!(response_text.contains("application/json"));
-        
-        println!("Headers response: {}", response_text);
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires internet connection
-    async fn test_http_reader_large_download() {
-        // Test with a larger file to validate streaming performance
-        let url = "https://httpbin.org/stream/100".to_string(); // 100 lines of JSON
-        let method = Method::GET;
-        let headers = HeaderMap::new();
-
-        let mut reader = HttpReader::with_capacity(url, method, headers, None, 64 * 1024).await.unwrap();
-        let mut result = Vec::new();
-        
-        let start = std::time::Instant::now();
-        reader.read_to_end(&mut result).await.unwrap();
-        let duration = start.elapsed();
-
-        println!("Downloaded {} bytes in {:?}", result.len(), duration);
-        
-        // Should have received substantial data
-        assert!(result.len() > 1000);
-    }
-
-    /// Get download statistics for monitoring
-    #[cfg(feature = "metrics")]
-    pub fn get_download_stats(&self) -> HttpDownloadStats {
-        HttpDownloadStats {
-            bytes_downloaded: self.bytes_downloaded,
-            elapsed_time: self.request_start_time.elapsed(),
-            connection_reused: self.connection_reused,
-            url: self.url.clone(),
-        }
-    }
-}
-
 /// HTTP download statistics for monitoring
 #[cfg(feature = "metrics")]
 #[derive(Debug, Clone)]
@@ -563,7 +441,17 @@ pub struct HttpDownloadStats {
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
-    use tokio_test;
+
+    /// Get download statistics for monitoring
+    #[cfg(feature = "metrics")]
+    pub fn get_download_stats(&self) -> HttpDownloadStats {
+        HttpDownloadStats {
+            bytes_downloaded: self.bytes_downloaded,
+            elapsed_time: self.request_start_time.elapsed(),
+            connection_reused: self.connection_reused,
+            url: self.url.clone(),
+        }
+    }
 
     #[tokio::test]
     #[ignore] // Requires internet connection
@@ -579,11 +467,11 @@ mod tests {
 
         // Should have received some JSON data
         assert!(!result.is_empty());
-        
+
         // Should be valid UTF-8 (JSON)
         let response_text = String::from_utf8(result).unwrap();
         assert!(response_text.contains("\""));
-        
+
         println!("Received response: {}", response_text);
     }
 
@@ -594,10 +482,10 @@ mod tests {
         let headers = HeaderMap::new();
 
         let result = HttpReader::new(url, method, headers, None).await;
-        
+
         // Should fail with connection error
         assert!(result.is_err());
-        
+
         let error = result.unwrap_err();
         println!("Expected error: {}", error);
     }
@@ -607,7 +495,7 @@ mod tests {
     async fn test_http_reader_with_custom_headers() {
         let url = "https://httpbin.org/headers".to_string();
         let method = Method::GET;
-        
+
         let mut headers = HeaderMap::new();
         headers.insert("User-Agent", "RustFS-Rio/1.0".parse().unwrap());
         headers.insert("Accept", "application/json".parse().unwrap());
@@ -618,11 +506,11 @@ mod tests {
         reader.read_to_end(&mut result).await.unwrap();
 
         let response_text = String::from_utf8(result).unwrap();
-        
+
         // Should contain our custom headers
         assert!(response_text.contains("RustFS-Rio/1.0"));
         assert!(response_text.contains("application/json"));
-        
+
         println!("Headers response: {}", response_text);
     }
 
@@ -634,18 +522,20 @@ mod tests {
         let method = Method::GET;
         let headers = HeaderMap::new();
 
-        let mut reader = HttpReader::with_capacity(url, method, headers, None, 64 * 1024).await.unwrap();
+        let mut reader = HttpReader::with_capacity(url, method, headers, None, 64 * 1024)
+            .await
+            .unwrap();
         let mut result = Vec::new();
-        
+
         let start = std::time::Instant::now();
         reader.read_to_end(&mut result).await.unwrap();
         let duration = start.elapsed();
 
         println!("Downloaded {} bytes in {:?}", result.len(), duration);
-        
+
         // Should have received substantial data
         assert!(result.len() > 1000);
-        
+
         // Calculate download speed
         let speed_mbps = (result.len() as f64 / (1024.0 * 1024.0)) / duration.as_secs_f64();
         println!("Download speed: {:.2} MB/s", speed_mbps);

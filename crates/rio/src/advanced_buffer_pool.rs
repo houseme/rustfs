@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 #[cfg(feature = "metrics")]
 use metrics::{counter, gauge, histogram};
@@ -30,10 +30,7 @@ use metrics::{counter, gauge, histogram};
 #[derive(Debug, Clone)]
 pub enum MemoryStrategy {
     /// Simple fixed-size buffers
-    Fixed {
-        buffer_size: usize,
-        max_buffers: usize,
-    },
+    Fixed { buffer_size: usize, max_buffers: usize },
     /// Adaptive buffer sizing based on usage patterns
     Adaptive {
         min_size: usize,
@@ -103,13 +100,13 @@ impl AdvancedBufferPool {
     /// Get an optimized buffer with size hint for maximum performance
     pub async fn get_optimized_buffer(&self, size_hint: usize) -> anyhow::Result<OptimizedBuffer> {
         let start_time = Instant::now();
-        
+
         #[cfg(feature = "metrics")]
         counter!("rustfs_buffer_pool_requests_total").increment(1);
 
         let optimal_size = self.calculate_optimal_size(size_hint).await;
         let mut available = self.available_buffers.lock().await;
-        
+
         // Try to find a suitable buffer from the pool
         let mut buffer = None;
         let mut cache_hit = false;
@@ -151,7 +148,8 @@ impl AdvancedBufferPool {
             timestamp: start_time,
             cache_hit,
             allocation_duration,
-        }).await;
+        })
+        .await;
 
         // Perform periodic optimization
         self.maybe_optimize_pool().await?;
@@ -163,8 +161,7 @@ impl AdvancedBufferPool {
             } else {
                 counter!("rustfs_buffer_pool_cache_misses_total").increment(1);
             }
-            histogram!("rustfs_buffer_pool_allocation_duration_us")
-                .record(allocation_duration.as_micros() as f64);
+            histogram!("rustfs_buffer_pool_allocation_duration_us").record(allocation_duration.as_micros() as f64);
         }
 
         Ok(OptimizedBuffer {
@@ -178,14 +175,19 @@ impl AdvancedBufferPool {
     async fn calculate_optimal_size(&self, size_hint: usize) -> usize {
         match &self.strategy {
             MemoryStrategy::Fixed { buffer_size, .. } => *buffer_size,
-            MemoryStrategy::Adaptive { min_size, max_size, growth_factor, .. } => {
+            MemoryStrategy::Adaptive {
+                min_size,
+                max_size,
+                growth_factor,
+                ..
+            } => {
                 let stats = self.buffer_stats.read().await;
                 let base_size = if stats.average_buffer_size > 0 {
                     ((stats.average_buffer_size as f64) * growth_factor) as usize
                 } else {
                     size_hint
                 };
-                
+
                 base_size.clamp(*min_size, *max_size)
             }
             MemoryStrategy::AdaptiveNuma { initial_size, .. } => {
@@ -204,22 +206,22 @@ impl AdvancedBufferPool {
     /// Allocate a new buffer with NUMA awareness if enabled
     async fn allocate_new_buffer(&self, size: usize) -> anyhow::Result<Vec<u8>> {
         match &self.strategy {
-            MemoryStrategy::AdaptiveNuma { numa_node: Some(node), .. } => {
+            MemoryStrategy::AdaptiveNuma {
+                numa_node: Some(node), ..
+            } => {
                 // In a real implementation, we would use libnuma or similar
                 // For now, we'll just allocate normally but log the NUMA intent
                 debug!("Allocating buffer on NUMA node {} (simulated)", node);
                 Ok(Vec::with_capacity(size))
             }
-            _ => {
-                Ok(Vec::with_capacity(size))
-            }
+            _ => Ok(Vec::with_capacity(size)),
         }
     }
 
     /// Update buffer pool statistics
     async fn update_stats(&self, size: usize, cache_hit: bool, duration: Duration) {
         let mut stats = self.buffer_stats.write().await;
-        
+
         stats.total_allocations += 1;
         if cache_hit {
             stats.cache_hits += 1;
@@ -246,24 +248,21 @@ impl AdvancedBufferPool {
 
         #[cfg(feature = "metrics")]
         {
-            gauge!("rustfs_buffer_pool_cache_hit_rate")
-                .set(stats.cache_hits as f64 / stats.total_allocations as f64);
-            gauge!("rustfs_buffer_pool_average_buffer_size_bytes")
-                .set(stats.average_buffer_size as f64);
-            gauge!("rustfs_buffer_pool_allocation_latency_us")
-                .set(stats.allocation_latency_us);
+            gauge!("rustfs_buffer_pool_cache_hit_rate").set(stats.cache_hits as f64 / stats.total_allocations as f64);
+            gauge!("rustfs_buffer_pool_average_buffer_size_bytes").set(stats.average_buffer_size as f64);
+            gauge!("rustfs_buffer_pool_allocation_latency_us").set(stats.allocation_latency_us);
         }
     }
 
     /// Record allocation for pattern analysis
     async fn record_allocation(&self, record: AllocationRecord) {
         let mut history = self.allocation_history.lock().await;
-        
+
         // Keep only recent history to prevent unbounded growth
         if history.len() >= 1000 {
             history.pop_front();
         }
-        
+
         history.push_back(record);
     }
 
@@ -271,12 +270,12 @@ impl AdvancedBufferPool {
     async fn maybe_optimize_pool(&self) -> anyhow::Result<()> {
         let mut last_opt = self.last_optimization.write().await;
         let now = Instant::now();
-        
+
         // Optimize every 30 seconds
         if now.duration_since(*last_opt) < Duration::from_secs(30) {
             return Ok(());
         }
-        
+
         *last_opt = now;
         drop(last_opt);
 
@@ -287,24 +286,17 @@ impl AdvancedBufferPool {
     async fn optimize_pool(&self) -> anyhow::Result<()> {
         let stats = self.buffer_stats.read().await;
         let history = self.allocation_history.lock().await;
-        
+
         if history.len() < 10 {
             return Ok(()); // Not enough data for optimization
         }
 
         // Analyze recent allocation patterns
-        let recent_allocations: Vec<_> = history.iter()
-            .rev()
-            .take(100)
-            .collect();
+        let recent_allocations: Vec<_> = history.iter().rev().take(100).collect();
 
-        let cache_hit_rate = recent_allocations.iter()
-            .filter(|r| r.cache_hit)
-            .count() as f64 / recent_allocations.len() as f64;
+        let cache_hit_rate = recent_allocations.iter().filter(|r| r.cache_hit).count() as f64 / recent_allocations.len() as f64;
 
-        let avg_recent_size: usize = recent_allocations.iter()
-            .map(|r| r.size)
-            .sum::<usize>() / recent_allocations.len();
+        let avg_recent_size: usize = recent_allocations.iter().map(|r| r.size).sum::<usize>() / recent_allocations.len();
 
         drop(history);
         drop(stats);
@@ -331,7 +323,7 @@ impl AdvancedBufferPool {
     /// Pre-allocate buffers to improve cache hit rate
     async fn preallocate_buffers(&self, size: usize, count: usize) -> anyhow::Result<()> {
         let mut available = self.available_buffers.lock().await;
-        
+
         let max_buffers = match &self.strategy {
             MemoryStrategy::Fixed { max_buffers, .. } => *max_buffers,
             MemoryStrategy::Adaptive { max_buffers, .. } => *max_buffers,
@@ -358,16 +350,16 @@ impl AdvancedBufferPool {
     /// Trim excess buffers to free memory
     async fn trim_excess_buffers(&self) -> anyhow::Result<()> {
         let mut available = self.available_buffers.lock().await;
-        
+
         let original_count = available.len();
         let target_count = (original_count * 3) / 4; // Remove 25% of buffers
-        
+
         available.truncate(target_count);
-        
+
         let removed = original_count - available.len();
         if removed > 0 {
             info!("Trimmed {} excess buffers from pool", removed);
-            
+
             #[cfg(feature = "metrics")]
             counter!("rustfs_buffer_pool_trim_events_total").increment(1);
         }
@@ -395,9 +387,9 @@ impl Clone for AdvancedBufferPool {
 
 /// An optimized buffer that automatically returns to the pool when dropped
 pub struct OptimizedBuffer {
-    buffer: Vec<u8>,
-    pool: std::sync::Weak<AdvancedBufferPool>,
-    original_capacity: usize,
+    pub buffer: Vec<u8>,
+    pub pool: std::sync::Weak<AdvancedBufferPool>,
+    pub original_capacity: usize,
 }
 
 impl OptimizedBuffer {
@@ -431,7 +423,7 @@ impl Drop for OptimizedBuffer {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.upgrade() {
             let buffer = std::mem::replace(&mut self.buffer, Vec::new());
-            
+
             // Return buffer to pool asynchronously
             tokio::spawn(async move {
                 if let Ok(mut available) = pool.available_buffers.try_lock() {
@@ -444,7 +436,7 @@ impl Drop for OptimizedBuffer {
 
                     if available.len() < max_buffers && buffer.capacity() <= 1024 * 1024 {
                         available.push_back(buffer);
-                        
+
                         #[cfg(feature = "metrics")]
                         counter!("rustfs_buffer_pool_returns_total").increment(1);
                     } else {
@@ -530,7 +522,7 @@ mod tests {
         // Allocate another buffer - should be a cache hit
         let buffer2 = pool.get_optimized_buffer(1024).await.unwrap();
         let stats = pool.get_stats().await;
-        
+
         // We should have some cache hits after buffer reuse
         assert!(stats.cache_hits > 0 || stats.total_allocations == 2);
     }

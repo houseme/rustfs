@@ -17,16 +17,16 @@
 //! This module provides sophisticated performance monitoring capabilities including
 //! real-time dashboards, pattern recognition, and predictive optimization.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::interval;
-use tracing::{debug, info, warn, error};
-use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 #[cfg(feature = "metrics")]
-use metrics::{counter, gauge, histogram};
+use metrics::{gauge, histogram};
 
 /// Configuration for performance monitoring
 #[derive(Debug, Clone)]
@@ -268,10 +268,7 @@ impl AdvancedPerformanceMonitor {
 
     /// Record a performance metric
     pub async fn record_metric(&self, metric_name: &str, value: f64) {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // Update pattern analyzer
         let mut analyzer = self.pattern_analyzer.lock().await;
@@ -279,8 +276,7 @@ impl AdvancedPerformanceMonitor {
 
         #[cfg(feature = "metrics")]
         {
-            histogram!(format!("rustfs_performance_monitor_{}", metric_name))
-                .record(value);
+            histogram!(format!("rustfs_performance_monitor_{}", metric_name)).record(value);
         }
     }
 
@@ -319,16 +315,16 @@ impl AdvancedPerformanceMonitor {
 
         tokio::spawn(async move {
             let mut interval = interval(interval_duration);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 // Collect system metrics (simulated for now)
                 let current_stats = Self::collect_system_metrics().await;
-                
+
                 // Update stats
                 *stats.write().await = current_stats;
-                
+
                 #[cfg(feature = "metrics")]
                 {
                     let stats_guard = stats.read().await;
@@ -348,15 +344,15 @@ impl AdvancedPerformanceMonitor {
 
         tokio::spawn(async move {
             let mut analysis_interval = interval(Duration::from_secs(60)); // Analyze every minute
-            
+
             loop {
                 analysis_interval.tick().await;
-                
+
                 let mut analyzer_guard = analyzer.lock().await;
                 let detected_trends = analyzer_guard.analyze_trends().await;
-                
+
                 *trends.write().await = detected_trends;
-                
+
                 debug!("Updated performance trends based on pattern analysis");
             }
         });
@@ -370,24 +366,21 @@ impl AdvancedPerformanceMonitor {
 
         tokio::spawn(async move {
             let mut optimization_interval = interval(Duration::from_secs(300)); // Optimize every 5 minutes
-            
+
             loop {
                 optimization_interval.tick().await;
-                
+
                 let current_trends = trends.read().await.clone();
                 let recent_data = {
                     let history = historical_data.lock().await;
                     history.iter().rev().take(60).cloned().collect::<Vec<_>>()
                 };
-                
+
                 if !recent_data.is_empty() {
-                    let new_recommendations = Self::generate_optimization_recommendations(
-                        &current_trends,
-                        &recent_data,
-                    ).await;
-                    
+                    let new_recommendations = Self::generate_optimization_recommendations(&current_trends, &recent_data).await;
+
                     *recommendations.write().await = new_recommendations;
-                    
+
                     debug!("Generated new optimization recommendations");
                 }
             }
@@ -396,10 +389,7 @@ impl AdvancedPerformanceMonitor {
 
     /// Collect system metrics (simplified implementation)
     async fn collect_system_metrics() -> RealTimeStats {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // In a real implementation, these would come from actual system monitoring
         RealTimeStats {
@@ -493,15 +483,12 @@ impl AdvancedPerformanceMonitor {
         recent_data: &[RealTimeStats],
     ) -> Vec<OptimizationRecommendation> {
         let mut recommendations = Vec::new();
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // Analyze recent performance data
         if let Some(avg_latency) = recent_data.iter().map(|s| s.avg_latency_us).reduce(|a, b| a + b) {
             let avg_latency = avg_latency / recent_data.len() as f64;
-            
+
             if avg_latency > 800.0 {
                 recommendations.push(OptimizationRecommendation {
                     category: "Latency".to_string(),
@@ -517,7 +504,7 @@ impl AdvancedPerformanceMonitor {
         // Check cache hit rates
         if let Some(avg_cache_hit_rate) = recent_data.iter().map(|s| s.cache_hit_rate).reduce(|a, b| a + b) {
             let avg_cache_hit_rate = avg_cache_hit_rate / recent_data.len() as f64;
-            
+
             if avg_cache_hit_rate < 0.8 {
                 recommendations.push(OptimizationRecommendation {
                     category: "Caching".to_string(),
@@ -551,10 +538,7 @@ impl AdvancedPerformanceMonitor {
 impl Default for RealTimeStats {
     fn default() -> Self {
         Self {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
             iops: 0.0,
             avg_latency_us: 0.0,
             p95_latency_us: 0.0,
@@ -580,7 +564,8 @@ impl PatternAnalyzer {
     }
 
     fn record_metric(&mut self, metric_name: &str, timestamp: u64, value: f64) {
-        let history = self.metric_history
+        let history = self
+            .metric_history
             .entry(metric_name.to_string())
             .or_insert_with(|| VecDeque::with_capacity(1000));
 
@@ -617,7 +602,9 @@ impl PatternAnalyzer {
         // Calculate R-squared
         let y_mean = sum_y / n;
         let ss_tot: f64 = history.iter().map(|(_, y)| (y - y_mean).powi(2)).sum();
-        let ss_res: f64 = history.iter().enumerate()
+        let ss_res: f64 = history
+            .iter()
+            .enumerate()
             .map(|(i, (_, y))| {
                 let predicted = intercept + slope * i as f64;
                 (y - predicted).powi(2)
@@ -678,7 +665,7 @@ mod tests {
     async fn test_performance_monitor_creation() {
         let config = PerformanceMonitorConfig::default();
         let monitor = AdvancedPerformanceMonitor::new(config);
-        
+
         let stats = monitor.get_real_time_stats().await;
         assert_eq!(stats.iops, 0.0); // Initial state
     }
@@ -687,9 +674,9 @@ mod tests {
     async fn test_metric_recording() {
         let config = PerformanceMonitorConfig::default();
         let monitor = AdvancedPerformanceMonitor::new(config);
-        
+
         monitor.record_metric("test_metric", 42.0).await;
-        
+
         // Verify the metric was recorded in the pattern analyzer
         let analyzer = monitor.pattern_analyzer.lock().await;
         assert!(analyzer.metric_history.contains_key("test_metric"));
@@ -699,18 +686,18 @@ mod tests {
     async fn test_historical_data_retention() {
         let mut config = PerformanceMonitorConfig::default();
         config.history_retention_period = Duration::from_secs(1); // Very short for testing
-        
+
         let monitor = AdvancedPerformanceMonitor::new(config);
-        
+
         // Add some historical data
         let stats1 = RealTimeStats::default();
         let mut stats2 = RealTimeStats::default();
         stats2.timestamp += 2; // 2 seconds later
-        
+
         monitor.update_stats(stats1).await;
         sleep(Duration::from_millis(1100)).await; // Wait for retention period
         monitor.update_stats(stats2).await;
-        
+
         let history = monitor.get_historical_data(Duration::from_secs(10)).await;
         // Should only have recent data due to retention policy
         assert!(history.len() <= 2);
@@ -720,21 +707,21 @@ mod tests {
     async fn test_performance_alerts() {
         let config = PerformanceMonitorConfig::default();
         let monitor = AdvancedPerformanceMonitor::new(config);
-        
+
         // Create stats that should trigger alerts
         let mut high_latency_stats = RealTimeStats::default();
         high_latency_stats.avg_latency_us = 1500.0; // Above threshold
         high_latency_stats.cache_hit_rate = 0.6; // Below threshold
-        
+
         monitor.update_stats(high_latency_stats).await;
-        
+
         let alerts = monitor.get_active_alerts().await;
         assert!(!alerts.is_empty());
-        
+
         // Should have alerts for high latency and low cache hit rate
         let latency_alert = alerts.iter().find(|a| a.metric == "avg_latency_us");
         assert!(latency_alert.is_some());
-        
+
         let cache_alert = alerts.iter().find(|a| a.metric == "cache_hit_rate");
         assert!(cache_alert.is_some());
     }
@@ -743,26 +730,23 @@ mod tests {
     async fn test_optimization_recommendations() {
         let config = PerformanceMonitorConfig::default();
         let monitor = AdvancedPerformanceMonitor::new(config);
-        
+
         // Create performance data that should generate recommendations
         let mut poor_performance_stats = RealTimeStats::default();
         poor_performance_stats.avg_latency_us = 900.0; // High latency
         poor_performance_stats.cache_hit_rate = 0.75; // Suboptimal cache hit rate
-        
+
         let trends = HashMap::new();
         let recent_data = vec![poor_performance_stats; 10];
-        
-        let recommendations = AdvancedPerformanceMonitor::generate_optimization_recommendations(
-            &trends,
-            &recent_data,
-        ).await;
-        
+
+        let recommendations = AdvancedPerformanceMonitor::generate_optimization_recommendations(&trends, &recent_data).await;
+
         assert!(!recommendations.is_empty());
-        
+
         // Should have recommendations for latency and caching
         let latency_rec = recommendations.iter().find(|r| r.category == "Latency");
         assert!(latency_rec.is_some());
-        
+
         let cache_rec = recommendations.iter().find(|r| r.category == "Caching");
         assert!(cache_rec.is_some());
     }

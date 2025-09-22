@@ -18,7 +18,7 @@
 //! on Linux systems for zero-copy, high-throughput disk I/O while maintaining
 //! compatibility with tokio on other platforms.
 
-use crate::runtime::{RuntimeHandle, RuntimeType, RuntimeError};
+use crate::runtime::{RuntimeError, RuntimeHandle, RuntimeType};
 use std::io::Result as IoResult;
 use std::path::Path;
 use std::pin::Pin;
@@ -39,7 +39,7 @@ fn get_file_semaphore() -> Result<&'static async_semaphore::Semaphore, RuntimeEr
         let permits = std::env::var("RUSTFS_MAX_CONCURRENT_FILE_OPS")
             .and_then(|s| s.parse().map_err(|_| std::env::VarError::NotPresent))
             .unwrap_or(1024); // Default to 1024 concurrent file operations
-        
+
         // Validate the permit count to avoid resource exhaustion
         let validated_permits = if permits > 0 && permits <= 65536 {
             permits
@@ -47,12 +47,14 @@ fn get_file_semaphore() -> Result<&'static async_semaphore::Semaphore, RuntimeEr
             tracing::warn!("Invalid RUSTFS_MAX_CONCURRENT_FILE_OPS value: {}, using default 1024", permits);
             1024
         };
-        
+
         tracing::info!("Initializing file operation semaphore with {} permits", validated_permits);
         async_semaphore::Semaphore::new(validated_permits)
     });
-    
-    GLOBAL_FILE_SEMAPHORE.get().ok_or(RuntimeError::InitializationFailed("Failed to initialize file semaphore".to_string()))
+
+    GLOBAL_FILE_SEMAPHORE
+        .get()
+        .ok_or(RuntimeError::InitializationFailed("Failed to initialize file semaphore".to_string()))
 }
 
 /// Trait for high-performance async file operations
@@ -63,25 +65,25 @@ fn get_file_semaphore() -> Result<&'static async_semaphore::Semaphore, RuntimeEr
 pub trait AsyncFile: AsyncRead + AsyncWrite + AsyncSeek + Send + Sync + Unpin {
     /// Read data from the file at a specific offset
     async fn read_at(&mut self, buf: &mut [u8], offset: u64) -> IoResult<usize>;
-    
+
     /// Write data to the file at a specific offset
     async fn write_at(&mut self, buf: &[u8], offset: u64) -> IoResult<usize>;
-    
+
     /// Read data into a vector with zero-copy optimization when available
     async fn read_vectored_at(&mut self, bufs: &mut [std::io::IoSliceMut<'_>], offset: u64) -> IoResult<usize>;
-    
+
     /// Write data from multiple buffers with zero-copy optimization when available
     async fn write_vectored_at(&mut self, bufs: &[std::io::IoSlice<'_>], offset: u64) -> IoResult<usize>;
-    
+
     /// Sync all data to disk
     async fn sync_all(&mut self) -> IoResult<()>;
-    
+
     /// Sync data (but not necessarily metadata) to disk
     async fn sync_data(&mut self) -> IoResult<()>;
-    
+
     /// Get file metadata
     async fn metadata(&self) -> IoResult<std::fs::Metadata>;
-    
+
     /// Set the file length, truncating or extending as needed
     async fn set_len(&mut self, size: u64) -> IoResult<()>;
 }
@@ -104,15 +106,15 @@ impl DiskFile {
     pub async fn open<P: AsRef<Path>>(path: P, runtime_handle: RuntimeHandle) -> Result<Self, RuntimeError> {
         let semaphore = get_file_semaphore()?;
         let _permit = semaphore.acquire().await;
-        
+
         #[cfg(feature = "metrics")]
         counter!("rustfs_file_opens_total", "runtime" => format!("{:?}", runtime_handle.runtime_type())).increment(1);
-        
+
         let _start = std::time::Instant::now();
-        
+
         // Use the runtime's timeout for file operations
         let timeout = runtime_handle.config().io_timeout;
-        
+
         let inner = match runtime_handle.runtime_type() {
             RuntimeType::Tokio => {
                 let file = tokio::time::timeout(timeout, tokio::fs::File::open(path.as_ref()))
@@ -132,32 +134,29 @@ impl DiskFile {
                 DiskFileInner::Tokio(file)
             }
         };
-        
+
         #[cfg(feature = "metrics")]
         histogram!("rustfs_file_open_duration_seconds").record(_start.elapsed().as_secs_f64());
-        
+
         debug!("Opened file: {}", path.as_ref().display());
-        
-        Ok(Self {
-            inner,
-            runtime_handle,
-        })
+
+        Ok(Self { inner, runtime_handle })
     }
-    
+
     /// Create a new file with optimized settings
     #[instrument(skip(runtime_handle), fields(path = %path.as_ref().display()))]
     pub async fn create<P: AsRef<Path>>(path: P, runtime_handle: RuntimeHandle) -> Result<Self, RuntimeError> {
         let semaphore = get_file_semaphore()?;
         let _permit = semaphore.acquire().await;
-        
+
         #[cfg(feature = "metrics")]
         counter!("rustfs_file_creates_total", "runtime" => format!("{:?}", runtime_handle.runtime_type())).increment(1);
-        
+
         let _start = std::time::Instant::now();
-        
+
         // Use the runtime's timeout for file operations
         let timeout = runtime_handle.config().io_timeout;
-        
+
         let inner = match runtime_handle.runtime_type() {
             RuntimeType::Tokio => {
                 let file = tokio::time::timeout(timeout, tokio::fs::File::create(path.as_ref()))
@@ -169,7 +168,7 @@ impl DiskFile {
             #[cfg(feature = "io_uring")]
             RuntimeType::Monoio => {
                 // For now, fall back to tokio with timeout
-                tracing::warn!("Monoio not fully implemented, falling back to Tokio with enhanced error handling");  
+                tracing::warn!("Monoio not fully implemented, falling back to Tokio with enhanced error handling");
                 let file = tokio::time::timeout(timeout, tokio::fs::File::create(path.as_ref()))
                     .await
                     .map_err(|_| RuntimeError::OperationTimeout)?
@@ -177,18 +176,15 @@ impl DiskFile {
                 DiskFileInner::Tokio(file)
             }
         };
-        
+
         #[cfg(feature = "metrics")]
         histogram!("rustfs_file_create_duration_seconds").record(_start.elapsed().as_secs_f64());
-        
+
         debug!("Created file: {}", path.as_ref().display());
-        
-        Ok(Self {
-            inner,
-            runtime_handle,
-        })
+
+        Ok(Self { inner, runtime_handle })
     }
-    
+
     /// Read object data with optimized I/O patterns
     #[instrument(skip(self, buf))]
     pub async fn read_object(&mut self, buf: &mut [u8], offset: u64) -> IoResult<usize> {
@@ -196,16 +192,16 @@ impl DiskFile {
             #[cfg(feature = "metrics")]
             counter!("rustfs_object_reads_total").increment(1);
         });
-        
+
         let _start = std::time::Instant::now();
         let result = self.read_at(buf, offset).await;
-        
+
         #[cfg(feature = "metrics")]
         histogram!("rustfs_object_read_duration_seconds").record(_start.elapsed().as_secs_f64());
-        
+
         result
     }
-    
+
     /// Write object data with optimized I/O patterns
     #[instrument(skip(self, data))]
     pub async fn write_object(&mut self, data: &[u8], offset: u64) -> IoResult<usize> {
@@ -213,21 +209,23 @@ impl DiskFile {
             #[cfg(feature = "metrics")]
             counter!("rustfs_object_writes_total").increment(1);
         });
-        
+
         let _start = std::time::Instant::now();
         let result = self.write_at(data, offset).await;
-        
+
         #[cfg(feature = "metrics")]
         histogram!("rustfs_object_write_duration_seconds").record(_start.elapsed().as_secs_f64());
-        
+
         result
     }
-    
+
     /// Bounded write operation to prevent resource exhaustion
     #[instrument(skip(self, data))]
     pub async fn bounded_write(&mut self, data: &[u8], offset: u64) -> Result<usize, RuntimeError> {
         let _permit = get_file_semaphore()?.acquire().await;
-        self.write_object(data, offset).await.map_err(|e| RuntimeError::IoError(e.to_string()))
+        self.write_object(data, offset)
+            .await
+            .map_err(|e| RuntimeError::IoError(e.to_string()))
     }
 }
 
@@ -248,7 +246,7 @@ impl AsyncFile for DiskFile {
             }
         }
     }
-    
+
     async fn write_at(&mut self, buf: &[u8], offset: u64) -> IoResult<usize> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => {
@@ -263,7 +261,7 @@ impl AsyncFile for DiskFile {
             }
         }
     }
-    
+
     async fn read_vectored_at(&mut self, bufs: &mut [std::io::IoSliceMut<'_>], offset: u64) -> IoResult<usize> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => {
@@ -286,12 +284,12 @@ impl AsyncFile for DiskFile {
             }
         }
     }
-    
+
     async fn write_vectored_at(&mut self, bufs: &[std::io::IoSlice<'_>], offset: u64) -> IoResult<usize> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => {
                 file.seek(std::io::SeekFrom::Start(offset)).await?;
-                // Tokio doesn't provide write_vectored directly, so we'll write each buffer sequentially  
+                // Tokio doesn't provide write_vectored directly, so we'll write each buffer sequentially
                 let mut total_written = 0;
                 for buf in bufs {
                     let written = file.write(buf).await?;
@@ -309,7 +307,7 @@ impl AsyncFile for DiskFile {
             }
         }
     }
-    
+
     async fn sync_all(&mut self) -> IoResult<()> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => file.sync_all().await,
@@ -317,7 +315,7 @@ impl AsyncFile for DiskFile {
             DiskFileInner::Monoio(file) => file.sync_all().await,
         }
     }
-    
+
     async fn sync_data(&mut self) -> IoResult<()> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => file.sync_data().await,
@@ -325,7 +323,7 @@ impl AsyncFile for DiskFile {
             DiskFileInner::Monoio(file) => file.sync_data().await,
         }
     }
-    
+
     async fn metadata(&self) -> IoResult<std::fs::Metadata> {
         match &self.inner {
             DiskFileInner::Tokio(file) => file.metadata().await,
@@ -333,7 +331,7 @@ impl AsyncFile for DiskFile {
             DiskFileInner::Monoio(file) => file.metadata().await,
         }
     }
-    
+
     async fn set_len(&mut self, size: u64) -> IoResult<()> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => file.set_len(size).await,
@@ -362,7 +360,7 @@ impl AsyncWrite for DiskFile {
             DiskFileInner::Monoio(file) => Pin::new(file).poll_write(cx, buf),
         }
     }
-    
+
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => Pin::new(file).poll_flush(cx),
@@ -370,7 +368,7 @@ impl AsyncWrite for DiskFile {
             DiskFileInner::Monoio(file) => Pin::new(file).poll_flush(cx),
         }
     }
-    
+
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => Pin::new(file).poll_shutdown(cx),
@@ -388,7 +386,7 @@ impl AsyncSeek for DiskFile {
             DiskFileInner::Monoio(file) => Pin::new(file).start_seek(position),
         }
     }
-    
+
     fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<u64>> {
         match &mut self.inner {
             DiskFileInner::Tokio(file) => Pin::new(file).poll_complete(cx),
@@ -403,23 +401,22 @@ mod tests {
     use super::*;
     use crate::runtime::init_runtime;
     use tempfile::NamedTempFile;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    
+
     #[tokio::test]
     async fn test_disk_file_operations() {
         let runtime = init_runtime().unwrap();
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
-        
+
         // Test file creation and writing
         let mut file = DiskFile::create(path, runtime.clone()).await.unwrap();
         let data = b"Hello, RustFS!";
         let written = file.write_object(data, 0).await.unwrap();
         assert_eq!(written, data.len());
-        
+
         file.sync_all().await.unwrap();
         drop(file);
-        
+
         // Test file opening and reading
         let mut file = DiskFile::open(path, runtime).await.unwrap();
         let mut buf = vec![0u8; data.len()];
@@ -427,13 +424,13 @@ mod tests {
         assert_eq!(read, data.len());
         assert_eq!(&buf, data);
     }
-    
+
     #[tokio::test]
     async fn test_bounded_write() {
         let runtime = init_runtime().unwrap();
         let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
-        
+
         let mut file = DiskFile::create(path, runtime).await.unwrap();
         let data = b"Bounded write test";
         let written = file.bounded_write(data, 0).await.unwrap();

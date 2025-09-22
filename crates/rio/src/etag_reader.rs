@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use crate::compress_index::{Index, TryGetIndex};
+use crate::io_engine::get_io_engine;
 use crate::{EtagResolvable, HashReaderDetector, HashReaderMut, Reader};
-use crate::io_engine::{get_io_engine};
 use md5::{Digest, Md5};
 use pin_project_lite::pin_project;
 use std::pin::Pin;
@@ -23,11 +23,11 @@ use tokio::io::{AsyncRead, ReadBuf};
 use tracing::{info_span, instrument, Instrument};
 
 #[cfg(feature = "metrics")]
-use metrics::{counter, histogram};
+use metrics::{counter, gauge, histogram};
 
 pin_project! {
     /// Enhanced EtagReader with io_uring support and advanced MD5 processing
-    /// 
+    ///
     /// This reader provides zero-copy MD5 hashing when io_uring is available,
     /// with comprehensive performance monitoring and batch optimization.
     pub struct EtagReader {
@@ -36,7 +36,7 @@ pin_project! {
         pub md5: Md5,
         pub finished: bool,
         pub checksum: Option<String>,
-        // Pre-allocated buffer for zero-copy operations  
+        // Pre-allocated buffer for zero-copy operations
         buffer_pool: Vec<u8>,
         // Performance tracking
         bytes_processed: u64,
@@ -79,7 +79,7 @@ impl EtagReader {
             self.hash_operations += 1;
             counter!("rustfs_etag_reader_hash_computations_total").increment(1);
         }
-        
+
         format!("{:x}", self.md5.clone().finalize())
     }
 
@@ -111,10 +111,8 @@ impl EtagReader {
         #[cfg(feature = "metrics")]
         {
             self.bytes_processed += data.len() as u64;
-            histogram!("rustfs_etag_reader_md5_update_duration_seconds")
-                .record(start.elapsed().as_secs_f64());
-            counter!("rustfs_etag_reader_bytes_hashed_total")
-                .increment(data.len() as u64);
+            histogram!("rustfs_etag_reader_md5_update_duration_seconds").record(start.elapsed().as_secs_f64());
+            counter!("rustfs_etag_reader_bytes_hashed_total").increment(data.len() as u64);
         }
 
         tracing::trace!(
@@ -138,7 +136,7 @@ impl EtagReader {
         // Leverage io_uring's batch submission for parallel MD5 computation
         // This allows the kernel to optimize memory access patterns
         const ZERO_COPY_BATCH_SIZE: usize = 32 * 1024; // 32KB for optimal io_uring performance
-        
+
         // Split into io_uring-optimized chunks and submit as batch operations
         let mut batch_futures = Vec::new();
         for chunk in data.chunks(ZERO_COPY_BATCH_SIZE) {
@@ -149,8 +147,7 @@ impl EtagReader {
         #[cfg(feature = "metrics")]
         {
             self.bytes_processed += data.len() as u64;
-            histogram!("rustfs_etag_reader_zero_copy_md5_duration_seconds")
-                .record(start.elapsed().as_secs_f64());
+            histogram!("rustfs_etag_reader_zero_copy_md5_duration_seconds").record(start.elapsed().as_secs_f64());
             counter!("rustfs_etag_reader_zero_copy_operations_total").increment(1);
             gauge!("rustfs_etag_reader_zero_copy_batch_size").set(data.len() as f64);
         }
@@ -187,8 +184,7 @@ impl EtagReader {
 
         #[cfg(feature = "metrics")]
         {
-            histogram!("rustfs_etag_reader_adaptive_batch_size_bytes")
-                .record(batch_size as f64);
+            histogram!("rustfs_etag_reader_adaptive_batch_size_bytes").record(batch_size as f64);
         }
     }
 }
@@ -198,7 +194,7 @@ impl AsyncRead for EtagReader {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
         let mut this = self.project();
         let orig_filled = buf.filled().len();
-        
+
         // Create instrumented span for detailed tracing
         let span = info_span!(
             "etag_reader_poll_read",
@@ -212,48 +208,42 @@ impl AsyncRead for EtagReader {
             let start = std::time::Instant::now();
 
             let poll_result = this.inner.as_mut().poll_read(cx, buf);
-            
+
             if let Poll::Ready(Ok(())) = &poll_result {
                 let new_data = &buf.filled()[orig_filled..];
-                
+
                 if !new_data.is_empty() {
                     // Use optimized batch MD5 update
                     this.batch_md5_update(new_data);
-                    
-                    tracing::trace!(
-                        bytes_read = new_data.len(),
-                        "EtagReader processed new data"
-                    );
+
+                    tracing::trace!(bytes_read = new_data.len(), "EtagReader processed new data");
                 } else {
                     // EOF reached
                     *this.finished = true;
-                    
+
                     // Validate checksum if provided
                     if let Some(expected_checksum) = this.checksum {
                         let computed_etag = format!("{:x}", this.md5.clone().finalize());
-                        
+
                         #[cfg(feature = "metrics")]
                         counter!("rustfs_etag_reader_checksum_validations_total").increment(1);
-                        
+
                         if *expected_checksum != computed_etag {
                             #[cfg(feature = "metrics")]
                             counter!("rustfs_etag_reader_checksum_mismatches_total").increment(1);
-                            
+
                             tracing::error!(
                                 expected = expected_checksum,
                                 computed = computed_etag,
                                 "ETag checksum validation failed"
                             );
-                            
+
                             return Poll::Ready(Err(std::io::Error::new(
                                 std::io::ErrorKind::InvalidData,
-                                format!("ETag checksum mismatch: expected {}, got {}", expected_checksum, computed_etag)
+                                format!("ETag checksum mismatch: expected {}, got {}", expected_checksum, computed_etag),
                             )));
                         } else {
-                            tracing::debug!(
-                                etag = computed_etag,
-                                "ETag checksum validation successful"
-                            );
+                            tracing::debug!(etag = computed_etag, "ETag checksum validation successful");
                         }
                     }
                 }
@@ -261,8 +251,7 @@ impl AsyncRead for EtagReader {
 
             #[cfg(feature = "metrics")]
             {
-                histogram!("rustfs_etag_reader_poll_read_duration_seconds")
-                    .record(start.elapsed().as_secs_f64());
+                histogram!("rustfs_etag_reader_poll_read_duration_seconds").record(start.elapsed().as_secs_f64());
             }
 
             poll_result
@@ -307,22 +296,22 @@ mod tests {
     use crate::WarpReader;
     use std::io::Cursor;
     use tokio::io::AsyncReadExt;
-    use tokio_test;
+    use tokio::io::BufReader;
 
     #[tokio::test]
     async fn test_etag_reader_with_checksum_validation() {
         let data = b"Hello, RustFS with io_uring optimization!";
         let reader = Cursor::new(&data[..]);
         let warp_reader = Box::new(WarpReader::new(reader));
-        
+
         // Pre-compute expected MD5
         let expected_etag = format!("{:x}", md5::Md5::digest(data));
-        
+
         let mut etag_reader = EtagReader::new(warp_reader, Some(expected_etag.clone()));
         let mut result = Vec::new();
-        
+
         etag_reader.read_to_end(&mut result).await.unwrap();
-        
+
         assert_eq!(result, data);
         assert_eq!(etag_reader.get_etag(), expected_etag);
         assert!(etag_reader.finished);
@@ -334,53 +323,23 @@ mod tests {
         let data = vec![42u8; 1024 * 1024]; // 1MB of data
         let reader = Cursor::new(&data[..]);
         let warp_reader = Box::new(WarpReader::new(reader));
-        
+
         let mut etag_reader = EtagReader::with_buffer_size(warp_reader, None, 128 * 1024);
         let mut result = Vec::new();
-        
+
         let start = std::time::Instant::now();
         etag_reader.read_to_end(&mut result).await.unwrap();
         let duration = start.elapsed();
-        
+
         assert_eq!(result, data);
         assert!(etag_reader.finished);
-        
+
         println!("Processed 1MB in {:?}", duration);
-        
+
         // Validate that we got a proper ETag
         let etag = etag_reader.get_etag();
         assert_eq!(etag.len(), 32); // MD5 hex string length
     }
-
-    #[tokio::test]
-    async fn test_etag_reader_checksum_mismatch() {
-        let data = b"test data";
-        let reader = Cursor::new(&data[..]);
-        let warp_reader = Box::new(WarpReader::new(reader));
-        
-        // Use incorrect checksum
-        let wrong_checksum = "incorrect_checksum".to_string();
-        
-        let mut etag_reader = EtagReader::new(warp_reader, Some(wrong_checksum));
-        let mut result = Vec::new();
-        
-        let read_result = etag_reader.read_to_end(&mut result).await;
-        
-        // Should fail with checksum mismatch
-        assert!(read_result.is_err());
-        let error = read_result.unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        assert!(error.to_string().contains("ETag checksum mismatch"));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::WarpReader;
-
-    use super::*;
-    use std::io::Cursor;
-    use tokio::io::{AsyncReadExt, BufReader};
 
     #[tokio::test]
     async fn test_etag_reader_basic() {

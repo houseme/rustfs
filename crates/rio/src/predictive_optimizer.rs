@@ -17,13 +17,13 @@
 //! This module implements intelligent predictive optimization using pattern recognition,
 //! machine learning-based predictions, and adaptive parameter tuning for maximum performance.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::interval;
 use tracing::{debug, info, warn};
-use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "metrics")]
 use metrics::{counter, gauge, histogram};
@@ -82,19 +82,11 @@ pub struct AccessPattern {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AccessPatternType {
     /// Sequential access pattern
-    Sequential {
-        stride: usize,
-        direction: AccessDirection,
-    },
+    Sequential { stride: usize, direction: AccessDirection },
     /// Random access pattern
-    Random {
-        hotspot_ratio: f64,
-    },
+    Random { hotspot_ratio: f64 },
     /// Periodic access pattern
-    Periodic {
-        period_seconds: f64,
-        amplitude: f64,
-    },
+    Periodic { period_seconds: f64, amplitude: f64 },
     /// Burst access pattern
     Burst {
         burst_duration_ms: f64,
@@ -129,30 +121,15 @@ pub struct OptimizationRecommendation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OptimizationType {
     /// Adjust prefetch parameters
-    PrefetchTuning {
-        prefetch_distance: usize,
-        prefetch_size: usize,
-    },
+    PrefetchTuning { prefetch_distance: usize, prefetch_size: usize },
     /// Adjust batch parameters
-    BatchTuning {
-        batch_size: usize,
-        batch_timeout_ms: f64,
-    },
+    BatchTuning { batch_size: usize, batch_timeout_ms: f64 },
     /// Select compression algorithm
-    CompressionSelection {
-        algorithm: String,
-        compression_level: u8,
-    },
+    CompressionSelection { algorithm: String, compression_level: u8 },
     /// Adjust buffer pool parameters
-    BufferPoolTuning {
-        pool_size: usize,
-        buffer_size: usize,
-    },
+    BufferPoolTuning { pool_size: usize, buffer_size: usize },
     /// Adjust concurrency parameters
-    ConcurrencyTuning {
-        max_concurrent_ops: usize,
-        queue_depth: usize,
-    },
+    ConcurrencyTuning { max_concurrent_ops: usize, queue_depth: usize },
 }
 
 /// Predictive optimization engine
@@ -264,7 +241,7 @@ impl PredictiveOptimizer {
     /// Record an access for pattern detection
     pub async fn record_access(&self, operation_type: &str, offset: u64, size: usize) {
         let timestamp = Instant::now();
-        
+
         // Update access patterns
         self.update_access_patterns(operation_type, offset, size, timestamp).await;
 
@@ -275,7 +252,7 @@ impl PredictiveOptimizer {
     /// Record performance feedback
     pub async fn record_performance(&self, operation_type: &str, latency_us: f64, throughput_bps: f64) {
         let current_params = self.current_parameters.read().await.clone();
-        
+
         let sample = PerformanceSample {
             timestamp: Instant::now(),
             operation_type: operation_type.to_string(),
@@ -293,8 +270,7 @@ impl PredictiveOptimizer {
         }
 
         #[cfg(feature = "metrics")]
-        histogram!("rustfs_predictive_optimizer_latency_us")
-            .record(latency_us);
+        histogram!("rustfs_predictive_optimizer_latency_us").record(latency_us);
     }
 
     /// Get current optimization parameters
@@ -323,35 +299,39 @@ impl PredictiveOptimizer {
 
             match &pattern.pattern_type {
                 AccessPatternType::Sequential { stride, direction } => {
-                    recommendations.extend(self.generate_sequential_recommendations(
-                        operation_type,
-                        *stride,
-                        direction,
-                        &current_params,
-                    ).await);
+                    recommendations.extend(
+                        self.generate_sequential_recommendations(operation_type, *stride, direction, &current_params)
+                            .await,
+                    );
                 }
                 AccessPatternType::Random { hotspot_ratio } => {
-                    recommendations.extend(self.generate_random_recommendations(
-                        operation_type,
-                        *hotspot_ratio,
-                        &current_params,
-                    ).await);
+                    recommendations.extend(
+                        self.generate_random_recommendations(operation_type, *hotspot_ratio, &current_params)
+                            .await,
+                    );
                 }
-                AccessPatternType::Periodic { period_seconds, amplitude } => {
-                    recommendations.extend(self.generate_periodic_recommendations(
-                        operation_type,
-                        *period_seconds,
-                        *amplitude,
-                        &current_params,
-                    ).await);
+                AccessPatternType::Periodic {
+                    period_seconds,
+                    amplitude,
+                } => {
+                    recommendations.extend(
+                        self.generate_periodic_recommendations(operation_type, *period_seconds, *amplitude, &current_params)
+                            .await,
+                    );
                 }
-                AccessPatternType::Burst { burst_duration_ms, inter_burst_delay_ms } => {
-                    recommendations.extend(self.generate_burst_recommendations(
-                        operation_type,
-                        *burst_duration_ms,
-                        *inter_burst_delay_ms,
-                        &current_params,
-                    ).await);
+                AccessPatternType::Burst {
+                    burst_duration_ms,
+                    inter_burst_delay_ms,
+                } => {
+                    recommendations.extend(
+                        self.generate_burst_recommendations(
+                            operation_type,
+                            *burst_duration_ms,
+                            *inter_burst_delay_ms,
+                            &current_params,
+                        )
+                        .await,
+                    );
                 }
             }
         }
@@ -359,11 +339,10 @@ impl PredictiveOptimizer {
         // Use prediction models to refine recommendations
         for (model_name, model) in models.iter() {
             if model.accuracy > self.config.confidence_threshold {
-                if let Some(predicted_rec) = self.generate_model_based_recommendation(
-                    model_name,
-                    model,
-                    &current_params,
-                ).await {
+                if let Some(predicted_rec) = self
+                    .generate_model_based_recommendation(model_name, model, &current_params)
+                    .await
+                {
                     recommendations.push(predicted_rec);
                 }
             }
@@ -371,7 +350,8 @@ impl PredictiveOptimizer {
 
         // Sort by priority and confidence
         recommendations.sort_by(|a, b| {
-            b.priority.cmp(&a.priority)
+            b.priority
+                .cmp(&a.priority)
                 .then_with(|| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal))
         });
 
@@ -381,21 +361,30 @@ impl PredictiveOptimizer {
     /// Apply an optimization recommendation
     pub async fn apply_optimization(&self, recommendation: OptimizationRecommendation) -> anyhow::Result<()> {
         let performance_before = self.measure_current_performance().await;
-        
+
         info!("Applying optimization: {:?}", recommendation.optimization_type);
 
         // Update parameters based on recommendation
         let mut params = self.current_parameters.write().await;
         match &recommendation.optimization_type {
-            OptimizationType::PrefetchTuning { prefetch_distance, prefetch_size } => {
+            OptimizationType::PrefetchTuning {
+                prefetch_distance,
+                prefetch_size,
+            } => {
                 params.prefetch_distance = *prefetch_distance;
                 params.prefetch_size = *prefetch_size;
             }
-            OptimizationType::BatchTuning { batch_size, batch_timeout_ms } => {
+            OptimizationType::BatchTuning {
+                batch_size,
+                batch_timeout_ms,
+            } => {
                 params.batch_size = *batch_size;
                 params.batch_timeout_ms = *batch_timeout_ms;
             }
-            OptimizationType::CompressionSelection { algorithm, compression_level } => {
+            OptimizationType::CompressionSelection {
+                algorithm,
+                compression_level,
+            } => {
                 params.compression_algorithm = algorithm.clone();
                 params.compression_level = *compression_level;
             }
@@ -403,7 +392,10 @@ impl PredictiveOptimizer {
                 params.buffer_pool_size = *pool_size;
                 params.buffer_size = *buffer_size;
             }
-            OptimizationType::ConcurrencyTuning { max_concurrent_ops, queue_depth } => {
+            OptimizationType::ConcurrencyTuning {
+                max_concurrent_ops,
+                queue_depth,
+            } => {
                 params.max_concurrent_ops = *max_concurrent_ops;
                 params.queue_depth = *queue_depth;
             }
@@ -416,7 +408,7 @@ impl PredictiveOptimizer {
             applied_at: Instant::now(),
             performance_before,
             performance_after: 0.0, // Will be updated later
-            success: true, // Assume success for now
+            success: true,          // Assume success for now
         };
 
         let mut history = self.optimization_history.lock().await;
@@ -440,25 +432,26 @@ impl PredictiveOptimizer {
 
         tokio::spawn(async move {
             let mut detection_interval = interval(Duration::from_secs(60));
-            
+
             loop {
                 detection_interval.tick().await;
-                
+
                 // Analyze patterns for changes and update confidence levels
                 let mut patterns_guard = patterns.write().await;
                 let current_time = Instant::now();
-                
+
                 // Decay confidence over time for patterns that haven't been observed recently
                 for pattern in patterns_guard.values_mut() {
                     let time_since_update = current_time.duration_since(pattern.last_update);
-                    if time_since_update > Duration::from_secs(300) { // 5 minutes
+                    if time_since_update > Duration::from_secs(300) {
+                        // 5 minutes
                         pattern.confidence *= 0.9; // Decay by 10%
                     }
                 }
 
                 // Remove patterns with very low confidence
                 patterns_guard.retain(|_, pattern| pattern.confidence > 0.1);
-                
+
                 debug!("Updated access pattern confidence levels");
             }
         });
@@ -472,30 +465,24 @@ impl PredictiveOptimizer {
 
         tokio::spawn(async move {
             let mut optimization_interval = interval(config.optimization_update_interval);
-            
+
             loop {
                 optimization_interval.tick().await;
-                
+
                 // Analyze recent optimization results and adjust parameters
                 let history = optimization_history.lock().await;
-                let recent_results: Vec<_> = history
-                    .iter()
-                    .rev()
-                    .take(10)
-                    .collect();
+                let recent_results: Vec<_> = history.iter().rev().take(10).collect();
 
                 if recent_results.len() >= 5 {
                     // Calculate success rate of recent optimizations
-                    let success_rate = recent_results.iter()
-                        .filter(|r| r.success)
-                        .count() as f64 / recent_results.len() as f64;
+                    let success_rate = recent_results.iter().filter(|r| r.success).count() as f64 / recent_results.len() as f64;
 
                     if success_rate < 0.7 {
                         warn!("Low optimization success rate: {:.2}%, adjusting parameters", success_rate * 100.0);
                         // Could implement parameter rollback or more conservative tuning here
                     }
                 }
-                
+
                 debug!("Analyzed optimization history and updated parameters");
             }
         });
@@ -509,10 +496,10 @@ impl PredictiveOptimizer {
 
         tokio::spawn(async move {
             let mut training_interval = interval(Duration::from_secs(300)); // Train every 5 minutes
-            
+
             loop {
                 training_interval.tick().await;
-                
+
                 let feedback_samples = {
                     let feedback = performance_feedback.lock().await;
                     if feedback.len() < config.min_samples_for_prediction {
@@ -539,7 +526,7 @@ impl PredictiveOptimizer {
                         models.insert(operation_type, model);
                     }
                 }
-                
+
                 debug!("Trained prediction models for {} operation types", models.len());
             }
         });
@@ -548,16 +535,14 @@ impl PredictiveOptimizer {
     /// Update access patterns based on observed access
     async fn update_access_patterns(&self, operation_type: &str, offset: u64, size: usize, timestamp: Instant) {
         let mut patterns = self.access_patterns.write().await;
-        
-        let pattern = patterns
-            .entry(operation_type.to_string())
-            .or_insert_with(|| AccessPattern {
-                pattern_type: AccessPatternType::Random { hotspot_ratio: 0.5 },
-                confidence: 0.1,
-                parameters: HashMap::new(),
-                last_update: timestamp,
-                observation_count: 0,
-            });
+
+        let pattern = patterns.entry(operation_type.to_string()).or_insert_with(|| AccessPattern {
+            pattern_type: AccessPatternType::Random { hotspot_ratio: 0.5 },
+            confidence: 0.1,
+            parameters: HashMap::new(),
+            last_update: timestamp,
+            observation_count: 0,
+        });
 
         pattern.last_update = timestamp;
         pattern.observation_count += 1;
@@ -704,7 +689,7 @@ impl PredictiveOptimizer {
     /// Generate model-based recommendation
     async fn generate_model_based_recommendation(
         &self,
-        model_name: &str,
+        _model_name: &str,
         model: &PredictionModel,
         _current_params: &OptimizationParameters,
     ) -> Option<OptimizationRecommendation> {
@@ -746,9 +731,7 @@ impl PredictiveOptimizer {
         let n = samples.len() as f64;
         let sum_x: f64 = (0..samples.len()).map(|i| i as f64).sum();
         let sum_y: f64 = samples.iter().map(|s| s.latency_us).sum();
-        let sum_xy: f64 = samples.iter().enumerate()
-            .map(|(i, s)| i as f64 * s.latency_us)
-            .sum();
+        let sum_xy: f64 = samples.iter().enumerate().map(|(i, s)| i as f64 * s.latency_us).sum();
         let sum_x2: f64 = (0..samples.len()).map(|i| (i as f64).powi(2)).sum();
 
         let slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x.powi(2));
@@ -757,7 +740,9 @@ impl PredictiveOptimizer {
         // Calculate R-squared
         let y_mean = sum_y / n;
         let ss_tot: f64 = samples.iter().map(|s| (s.latency_us - y_mean).powi(2)).sum();
-        let ss_res: f64 = samples.iter().enumerate()
+        let ss_res: f64 = samples
+            .iter()
+            .enumerate()
             .map(|(i, s)| {
                 let predicted = intercept + slope * i as f64;
                 (s.latency_us - predicted).powi(2)
@@ -790,7 +775,7 @@ impl PredictiveOptimizer {
         // Return average latency of recent samples
         let recent_samples: Vec<_> = feedback.iter().rev().take(10).collect();
         let avg_latency: f64 = recent_samples.iter().map(|s| s.latency_us).sum::<f64>() / recent_samples.len() as f64;
-        
+
         avg_latency
     }
 }
@@ -804,7 +789,7 @@ mod tests {
     async fn test_predictive_optimizer_creation() {
         let config = PredictiveOptimizerConfig::default();
         let optimizer = PredictiveOptimizer::new(config);
-        
+
         let params = optimizer.get_current_parameters().await;
         assert_eq!(params.batch_size, 16); // Default value
     }
@@ -813,13 +798,13 @@ mod tests {
     async fn test_access_pattern_recording() {
         let config = PredictiveOptimizerConfig::default();
         let optimizer = PredictiveOptimizer::new(config);
-        
+
         // Record several sequential accesses
         for i in 0..10 {
             optimizer.record_access("test_op", i * 1024, 1024).await;
             sleep(Duration::from_millis(10)).await;
         }
-        
+
         let patterns = optimizer.get_access_patterns().await;
         assert!(patterns.contains_key("test_op"));
     }
@@ -828,13 +813,15 @@ mod tests {
     async fn test_performance_feedback() {
         let config = PredictiveOptimizerConfig::default();
         let optimizer = PredictiveOptimizer::new(config);
-        
+
         // Record performance samples
         for i in 0..20 {
-            optimizer.record_performance("test_op", 500.0 + i as f64 * 10.0, 1_000_000.0).await;
+            optimizer
+                .record_performance("test_op", 500.0 + i as f64 * 10.0, 1_000_000.0)
+                .await;
             sleep(Duration::from_millis(5)).await;
         }
-        
+
         // Should have recorded the samples
         let feedback = optimizer.performance_feedback.lock().await;
         assert_eq!(feedback.len(), 20);
@@ -844,26 +831,30 @@ mod tests {
     async fn test_recommendation_generation() {
         let config = PredictiveOptimizerConfig::default();
         let optimizer = PredictiveOptimizer::new(config);
-        
+
         // Create a detected pattern that should generate recommendations
         let mut patterns = optimizer.access_patterns.write().await;
-        patterns.insert("test_op".to_string(), AccessPattern {
-            pattern_type: AccessPatternType::Sequential {
-                stride: 1024,
-                direction: AccessDirection::Forward,
+        patterns.insert(
+            "test_op".to_string(),
+            AccessPattern {
+                pattern_type: AccessPatternType::Sequential {
+                    stride: 1024,
+                    direction: AccessDirection::Forward,
+                },
+                confidence: 0.9,
+                parameters: HashMap::new(),
+                last_update: Instant::now(),
+                observation_count: 50,
             },
-            confidence: 0.9,
-            parameters: HashMap::new(),
-            last_update: Instant::now(),
-            observation_count: 50,
-        });
+        );
         drop(patterns);
-        
+
         let recommendations = optimizer.get_recommendations().await;
         assert!(!recommendations.is_empty());
-        
+
         // Should have a prefetch tuning recommendation
-        let prefetch_rec = recommendations.iter()
+        let prefetch_rec = recommendations
+            .iter()
             .find(|r| matches!(r.optimization_type, OptimizationType::PrefetchTuning { .. }));
         assert!(prefetch_rec.is_some());
     }
@@ -872,7 +863,7 @@ mod tests {
     async fn test_optimization_application() {
         let config = PredictiveOptimizerConfig::default();
         let optimizer = PredictiveOptimizer::new(config);
-        
+
         let recommendation = OptimizationRecommendation {
             optimization_type: OptimizationType::BatchTuning {
                 batch_size: 32,
@@ -884,10 +875,10 @@ mod tests {
             priority: 5,
             apply_at: Instant::now(),
         };
-        
+
         let result = optimizer.apply_optimization(recommendation).await;
         assert!(result.is_ok());
-        
+
         // Check that parameters were updated
         let params = optimizer.get_current_parameters().await;
         assert_eq!(params.batch_size, 32);

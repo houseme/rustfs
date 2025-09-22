@@ -16,7 +16,7 @@
 //
 // RustFS Rio provides a sophisticated, asynchronous I/O framework optimized for
 // distributed object storage systems with advanced io_uring integration,
-// zero-copy operations, comprehensive performance monitoring, and further 
+// zero-copy operations, comprehensive performance monitoring, and further
 // optimizations for extreme performance scenarios.
 //
 // ## Key Features
@@ -83,7 +83,7 @@
 // detects and uses io_uring for file operations, providing:
 //
 // - **2-5x throughput improvement** for concurrent workloads
-// - **40% latency reduction** for individual operations  
+// - **40% latency reduction** for individual operations
 // - **Zero-copy operations** eliminating memory allocation overhead
 // - **Batch processing** reducing system call overhead
 // - **Advanced prefetching** improving cache hit rates
@@ -139,28 +139,26 @@
 
 // Advanced optimization modules
 mod advanced_buffer_pool;
-pub use advanced_buffer_pool::{AdvancedBufferPool, MemoryStrategy, OptimizedBuffer, BufferPoolStats};
+pub use advanced_buffer_pool::{AdvancedBufferPool, BufferPoolStats, MemoryStrategy, OptimizedBuffer};
 
 mod performance_monitor;
 pub use performance_monitor::{
-    AdvancedPerformanceMonitor, PerformanceMonitorConfig, RealTimeStats, 
-    PerformanceTrend, PerformanceAlert, OptimizationRecommendation as MonitorOptimizationRecommendation
+    AdvancedPerformanceMonitor, OptimizationRecommendation as MonitorOptimizationRecommendation, PerformanceAlert,
+    PerformanceMonitorConfig, PerformanceTrend, RealTimeStats,
 };
 
 mod predictive_optimizer;
 pub use predictive_optimizer::{
-    PredictiveOptimizer, PredictiveOptimizerConfig, AccessPattern, AccessPatternType,
-    OptimizationParameters, OptimizationRecommendation as PredictiveOptimizationRecommendation,
-    OptimizationType
+    AccessPattern, AccessPatternType, OptimizationParameters, OptimizationRecommendation as PredictiveOptimizationRecommendation,
+    OptimizationType, PredictiveOptimizer, PredictiveOptimizerConfig,
 };
 
 // Core I/O modules
-use std::pin::Pin;
 use tracing::info;
 
 // Performance improvements expected:
 // - **2-5x throughput improvement** for high-concurrency workloads
-// - **40% latency reduction** for disk operations  
+// - **40% latency reduction** for disk operations
 // - **Better IOPS utilization** for NVMe/SSD storage (100k+ IOPS)
 // - **Reduced CPU overhead** from eliminating thread pool blocking
 // - **Zero-copy operations** with vectored I/O for large data transfers
@@ -176,27 +174,27 @@ use tracing::info;
 // async fn main() -> anyhow::Result<()> {
 //     // Initialize optimized runtime with io_uring support
 //     let runtime = init_runtime()?;
-//     
+//
 //     // Create high-performance file handle
 //     let file = DiskFile::create("large_object.bin", runtime).await?;
-//     
+//
 //     // Build processing pipeline with advanced readers
 //     let compress_reader = CompressReader::with_block_size(
 //         file,
 //         1024 * 1024, // 1MB blocks for optimal throughput
 //         CompressionAlgorithm::Deflate
 //     );
-//     
+//
 //     let etag_reader = EtagReader::with_buffer_size(
 //         Box::new(compress_reader),
 //         None,
 //         128 * 1024 // 128KB buffer for zero-copy operations
 //     );
-//     
+//
 //     // Process with full performance monitoring
 //     let mut buffer = Vec::new();
 //     tokio::io::AsyncReadExt::read_to_end(&mut etag_reader, &mut buffer).await?;
-//     
+//
 //     Ok(())
 // }
 // ```
@@ -210,7 +208,7 @@ use tracing::info;
 // #[tokio::main]
 // async fn main() -> anyhow::Result<()> {
 //     let runtime = init_runtime()?;
-//     
+//
 //     // High-performance HTTP streaming with connection pooling
 //     let http_reader = HttpReader::with_capacity(
 //         "https://storage.example.com/object".to_string(),
@@ -219,7 +217,7 @@ use tracing::info;
 //         None,
 //         1024 * 1024 // 1MB buffer
 //     ).await?;
-//     
+//
 //     // Add encryption layer with batch processing
 //     let key = [1u8; 32]; // AES-256 key
 //     let nonce = [2u8; 12]; // GCM nonce
@@ -229,7 +227,7 @@ use tracing::info;
 //         nonce,
 //         256 * 1024 // 256KB encryption blocks
 //     );
-//     
+//
 //     // Write-ahead log with batch optimization
 //     let wal_config = WalConfig {
 //         batch_size: 200,
@@ -238,18 +236,18 @@ use tracing::info;
 //         buffer_size: 512 * 1024,
 //         ..Default::default()
 //     };
-//     
+//
 //     let wal = Wal::new("transactions.wal", runtime, wal_config).await?;
-//     
+//
 //     Ok(())
 // }
 // ```
 
 // Enhanced runtime and I/O engine modules
-pub mod runtime;
 pub mod disk;
-pub mod wal;
 pub mod io_engine;
+pub mod runtime;
+pub mod wal;
 
 // Advanced reader/writer pipeline
 mod limit_reader;
@@ -262,7 +260,7 @@ mod hash_reader;
 pub use hash_reader::{HashReader, HashReaderMut};
 
 mod compress_reader;
-pub use compress_reader::CompressReader;
+pub use compress_reader::{CompressReader, DecompressReader};
 
 mod encrypt_reader;
 pub use encrypt_reader::EncryptReader;
@@ -286,15 +284,12 @@ mod etag;
 pub use etag::EtagResolvable;
 
 // Re-export enhanced runtime functionality
-pub use runtime::{
-    init_runtime, init_runtime_with_config, RuntimeConfig, RuntimeHandle, 
-    RuntimeType, RuntimeError
-};
 pub use disk::{AsyncFile, DiskFile};
+pub use runtime::{init_runtime, init_runtime_with_config, RuntimeConfig, RuntimeError, RuntimeHandle, RuntimeType};
 pub use wal::{Wal, WalConfig, WalEntry};
 
 // Re-export advanced I/O engine
-pub use io_engine::{IoEngine, get_io_engine, init_io_engine};
+pub use io_engine::{get_io_engine, init_io_engine, IoEngine};
 
 #[cfg(feature = "metrics")]
 pub use io_engine::IoEngineStats;
@@ -357,31 +352,31 @@ impl Default for AdvancedRioConfig {
 /// Initialize Rio runtime with advanced configuration
 pub async fn init_runtime_with_advanced_config(config: AdvancedRioConfig) -> anyhow::Result<EnhancedRioRuntime> {
     use crate::runtime::init_runtime;
-    
+
     info!("Initializing Rio with advanced configuration: {:?}", config);
-    
+
     // Initialize base runtime
     let base_runtime = init_runtime()?;
-    
+
     // Initialize advanced components
     let buffer_pool = if config.enable_buffer_pools {
         Some(AdvancedBufferPool::new(config.memory_strategy.clone()))
     } else {
         None
     };
-    
+
     let performance_monitor = if config.enable_performance_monitoring {
         Some(AdvancedPerformanceMonitor::new(config.performance_config.clone()))
     } else {
         None
     };
-    
+
     let predictive_optimizer = if config.enable_ml_optimizations {
         Some(PredictiveOptimizer::new(config.predictive_config.clone()))
     } else {
         None
     };
-    
+
     Ok(EnhancedRioRuntime {
         base_runtime,
         buffer_pool,
@@ -405,27 +400,27 @@ impl EnhancedRioRuntime {
     pub fn base_runtime(&self) -> &crate::runtime::RuntimeHandle {
         &self.base_runtime
     }
-    
+
     /// Get the advanced buffer pool if enabled
     pub fn buffer_pool(&self) -> Option<&AdvancedBufferPool> {
         self.buffer_pool.as_ref()
     }
-    
+
     /// Get the performance monitor if enabled
     pub fn performance_monitor(&self) -> Option<&AdvancedPerformanceMonitor> {
         self.performance_monitor.as_ref()
     }
-    
+
     /// Get the predictive optimizer if enabled
     pub fn predictive_optimizer(&self) -> Option<&PredictiveOptimizer> {
         self.predictive_optimizer.as_ref()
     }
-    
+
     /// Get the runtime configuration
     pub fn config(&self) -> &AdvancedRioConfig {
         &self.config
     }
-    
+
     /// Get an optimized buffer for high-performance operations
     pub async fn get_optimized_buffer(&self, size_hint: usize) -> anyhow::Result<OptimizedBuffer> {
         if let Some(pool) = &self.buffer_pool {
@@ -436,40 +431,40 @@ impl EnhancedRioRuntime {
             Ok(OptimizedBuffer::from_vec(buffer))
         }
     }
-    
+
     /// Record performance metrics for optimization
     pub async fn record_performance(&self, operation: &str, latency_us: f64, throughput_bps: f64) {
         if let Some(monitor) = &self.performance_monitor {
             monitor.record_metric("latency_us", latency_us).await;
             monitor.record_metric("throughput_bps", throughput_bps).await;
         }
-        
+
         if let Some(optimizer) = &self.predictive_optimizer {
             optimizer.record_performance(operation, latency_us, throughput_bps).await;
         }
     }
-    
+
     /// Record access pattern for predictive optimization
     pub async fn record_access(&self, operation: &str, offset: u64, size: usize) {
         if let Some(optimizer) = &self.predictive_optimizer {
             optimizer.record_access(operation, offset, size).await;
         }
     }
-    
+
     /// Get current optimization recommendations
     pub async fn get_optimization_recommendations(&self) -> Vec<String> {
         let mut recommendations = Vec::new();
-        
+
         if let Some(monitor) = &self.performance_monitor {
             let monitor_recs = monitor.get_optimization_recommendations().await;
             recommendations.extend(monitor_recs.into_iter().map(|r| r.action));
         }
-        
+
         if let Some(optimizer) = &self.predictive_optimizer {
             let opt_recs = optimizer.get_recommendations().await;
             recommendations.extend(opt_recs.into_iter().map(|r| format!("{:?}", r.optimization_type)));
         }
-        
+
         recommendations
     }
 }
