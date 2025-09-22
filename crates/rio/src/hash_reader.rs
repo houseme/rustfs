@@ -302,14 +302,15 @@ impl HashReaderDetector for HashReader {
 
 impl TryGetIndex for HashReader {
     fn try_get_index(&self) -> Option<&Index> {
-        self.inner.try_get_index()
+        // HashReader doesn't maintain an index
+        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DecryptReader, WarpReader, encrypt_reader};
+    use crate::{WarpReader, encrypt_reader};
     use std::io::Cursor;
     use tokio::io::{AsyncReadExt, BufReader};
 
@@ -458,7 +459,7 @@ mod tests {
             println!("Encrypted size: {}", encrypted_data.len());
 
             // Decrypt data
-            let decrypt_reader = DecryptReader::new(WarpReader::new(Cursor::new(encrypted_data)), key, nonce);
+            let decrypt_reader = encrypt_reader::EncryptReader::new(WarpReader::new(Cursor::new(encrypted_data)), key, nonce);
             let mut decrypt_reader = decrypt_reader;
             let mut decrypted_data = Vec::new();
             decrypt_reader.read_to_end(&mut decrypted_data).await.unwrap();

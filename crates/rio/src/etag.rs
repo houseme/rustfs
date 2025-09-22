@@ -46,6 +46,11 @@ let etag = resolve_etag_generic(&mut reader);
 ```
 */
 
+/// Trait for resolving ETag from AsyncRead wrappers
+pub trait EtagResolvable {
+    fn try_resolve_etag(&mut self) -> Option<String>;
+}
+
 #[cfg(test)]
 mod tests {
 
