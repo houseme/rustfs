@@ -75,7 +75,8 @@ impl HashReaderDetector for HardLimitReader {
 
 impl TryGetIndex for HardLimitReader {
     fn try_get_index(&self) -> Option<&Index> {
-        self.inner.try_get_index()
+        // HardLimitReader doesn't maintain an index
+        None
     }
 }
 

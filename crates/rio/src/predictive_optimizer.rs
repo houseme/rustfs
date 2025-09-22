@@ -65,7 +65,7 @@ impl Default for PredictiveOptimizerConfig {
 }
 
 /// Access pattern for predictive optimization
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AccessPattern {
     /// Pattern type
     pub pattern_type: AccessPatternType,
@@ -73,8 +73,8 @@ pub struct AccessPattern {
     pub confidence: f64,
     /// Pattern parameters
     pub parameters: HashMap<String, f64>,
-    /// Last update timestamp
-    pub last_update: Instant,
+    /// Last update timestamp (stored as duration since epoch)
+    pub last_update: Duration,
     /// Number of observations supporting this pattern
     pub observation_count: usize,
 }
@@ -102,7 +102,7 @@ pub enum AccessDirection {
 }
 
 /// Optimization recommendation from the predictive engine
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct OptimizationRecommendation {
     /// Type of optimization
     pub optimization_type: OptimizationType,
@@ -114,8 +114,8 @@ pub struct OptimizationRecommendation {
     pub confidence: f64,
     /// Priority (1-10, 10 being highest)
     pub priority: u8,
-    /// When to apply this optimization
-    pub apply_at: Instant,
+    /// When to apply this optimization (stored as duration since creation)
+    pub apply_at: Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

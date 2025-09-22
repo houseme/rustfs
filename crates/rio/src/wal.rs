@@ -44,10 +44,20 @@ pub struct WalEntry {
     pub data: Bytes,
     /// Entry timestamp
     pub timestamp: std::time::SystemTime,
+    /// Entry type (for extensibility)
+    pub entry_type: u8,
 }
 
 impl WalEntry {
     /// Create a new WAL entry
+    pub fn new(sequence: u64, data: Bytes) -> Self {
+        Self {
+            sequence,
+            data,
+            timestamp: std::time::SystemTime::now(),
+            entry_type: 0, // Default entry type
+        }
+    }
     pub fn new(sequence: u64, data: Bytes) -> Self {
         Self {
             sequence,
@@ -607,8 +617,12 @@ impl Wal {
         // Write sequence number (8 bytes)
         buffer.extend_from_slice(&sequence.to_le_bytes());
 
-        // Write timestamp (8 bytes)
-        buffer.extend_from_slice(&entry.timestamp.timestamp_nanos_opt().unwrap_or(0).to_le_bytes());
+        // Write timestamp (8 bytes) - use duration since epoch
+        let timestamp_nanos = entry.timestamp
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        buffer.extend_from_slice(&timestamp_nanos.to_le_bytes());
 
         // Write entry type (1 byte)
         buffer.push(entry.entry_type as u8);

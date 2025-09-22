@@ -302,7 +302,8 @@ impl HashReaderDetector for HashReader {
 
 impl TryGetIndex for HashReader {
     fn try_get_index(&self) -> Option<&Index> {
-        self.inner.try_get_index()
+        // HashReader doesn't maintain an index
+        None
     }
 }
 

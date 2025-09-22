@@ -286,7 +286,8 @@ impl HashReaderDetector for EtagReader {
 
 impl TryGetIndex for EtagReader {
     fn try_get_index(&self) -> Option<&Index> {
-        self.inner.try_get_index()
+        // EtagReader doesn't maintain an index, delegate to inner reader if possible
+        None
     }
 }
 

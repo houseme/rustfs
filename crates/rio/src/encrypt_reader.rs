@@ -61,7 +61,7 @@ pin_project! {
 
 impl<R> EncryptReader<R>
 where
-    R: Reader,
+    R: AsyncRead + Unpin + Send + Sync,
 {
     /// Create new EncryptReader with enhanced security and performance
     pub fn new(inner: R, key: [u8; 32], nonce: [u8; 12]) -> Self {
@@ -329,10 +329,11 @@ where
 
 impl<R> TryGetIndex for EncryptReader<R>
 where
-    R: AsyncRead + Unpin + Send + Sync + TryGetIndex,
+    R: AsyncRead + Unpin + Send + Sync,
 {
     fn try_get_index(&self) -> Option<&Index> {
-        self.inner.try_get_index()
+        // EncryptReader doesn't maintain an index
+        None
     }
 }
 

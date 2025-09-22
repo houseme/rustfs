@@ -98,11 +98,10 @@ impl HttpReader {
         body: Option<Vec<u8>>,
         capacity: usize,
     ) -> io::Result<Self> {
-        #[cfg(feature = "metrics")]
         let request_start = std::time::Instant::now();
 
         let client = get_optimized_http_client();
-        let io_engine = get_io_engine();
+        let _io_engine = get_io_engine();
 
         // Build request with optimizations
         let mut req_builder = client.request(method.clone(), &url);
@@ -129,7 +128,6 @@ impl HttpReader {
             url = %url,
             method = ?method,
             buffer_size = buffer_size,
-            zero_copy_enabled = io_engine.supports_zero_copy(),
             "Initiating HTTP request with optimized buffering"
         );
 
@@ -139,12 +137,11 @@ impl HttpReader {
             .await
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-        // Check if connection was reused
+        // Check if connection was reused (simplified check)
         let connection_reused = response
             .extensions()
             .get::<reqwest::tls::TlsInfo>()
-            .map(|tls| tls.server_cert_fingerprint().is_some())
-            .unwrap_or(false);
+            .is_some();
 
         let status = response.status();
         if !status.is_success() {
@@ -159,7 +156,7 @@ impl HttpReader {
 
         // Wrap stream with enhanced buffering
         let boxed_stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync>> = Box::pin(stream);
-        let stream_reader = StreamReader::with_capacity(boxed_stream, buffer_size);
+        let stream_reader = StreamReader::new(boxed_stream);
 
         #[cfg(feature = "metrics")]
         {
@@ -176,7 +173,6 @@ impl HttpReader {
             headers,
             inner: stream_reader,
             bytes_downloaded: 0,
-            #[cfg(feature = "metrics")]
             request_start_time: request_start,
             connection_reused,
         })
@@ -193,159 +189,6 @@ impl HttpReader {
         // Use larger buffer for streaming workloads
         const STREAMING_BUFFER_SIZE: usize = 1024 * 1024; // 1MB buffer
         Self::with_capacity(url, method, headers, body, STREAMING_BUFFER_SIZE).await
-    }
-
-    /// Create HttpReader with advanced buffering and connection optimization
-    #[instrument(skip(headers, body), fields(url = %url, method = ?method, buf_size = _read_buf_size))]
-    pub async fn with_capacity(
-        url: String,
-        method: Method,
-        headers: HeaderMap,
-        body: Option<Vec<u8>>,
-        _read_buf_size: usize,
-    ) -> io::Result<Self> {
-        let span = info_span!(
-            "http_reader_creation",
-            url = %url,
-            method = ?method,
-            has_body = body.is_some()
-        );
-
-        async move {
-            #[cfg(feature = "metrics")]
-            let start_time = std::time::Instant::now();
-
-            // Enhanced connection validation with HEAD request
-            let client = get_optimized_http_client();
-
-            #[cfg(feature = "metrics")]
-            counter!("rustfs_http_reader_head_requests_total").increment(1);
-
-            let head_resp = client.head(&url).headers(headers.clone()).send().await;
-
-            match head_resp {
-                Ok(resp) => {
-                    http_log!("[HttpReader::new] HEAD status: {}", resp.status());
-
-                    #[cfg(feature = "metrics")]
-                    {
-                        counter!("rustfs_http_reader_successful_head_requests_total").increment(1);
-                        histogram!("rustfs_http_reader_head_request_duration_seconds").record(start_time.elapsed().as_secs_f64());
-                    }
-
-                    if !resp.status().is_success() {
-                        #[cfg(feature = "metrics")]
-                        counter!("rustfs_http_reader_failed_head_requests_total").increment(1);
-
-                        return Err(Error::other(format!("HEAD request failed: url: {}, status: {}", url, resp.status())));
-                    }
-
-                    // Log connection reuse information
-                    #[cfg(feature = "metrics")]
-                    let connection_reused = resp
-                        .headers()
-                        .get("connection")
-                        .and_then(|v| v.to_str().ok())
-                        .map(|s| s.to_lowercase().contains("keep-alive"))
-                        .unwrap_or(false);
-                }
-                Err(e) => {
-                    http_log!("[HttpReader::new] HEAD error: {e}");
-
-                    #[cfg(feature = "metrics")]
-                    counter!("rustfs_http_reader_head_request_errors_total").increment(1);
-
-                    return Err(Error::other(e.source().map(|s| s.to_string()).unwrap_or_else(|| e.to_string())));
-                }
-            }
-
-            // Create the main request with enhanced configuration
-            let client = get_optimized_http_client();
-            let mut request: RequestBuilder = client.request(method.clone(), url.clone()).headers(headers.clone());
-
-            if let Some(body) = body {
-                request = request.body(body);
-            }
-
-            #[cfg(feature = "metrics")]
-            let request_start = std::time::Instant::now();
-
-            match request.send().await {
-                Ok(response) => {
-                    http_log!("[HttpReader::new] Response status: {}", response.status());
-
-                    #[cfg(feature = "metrics")]
-                    {
-                        counter!("rustfs_http_reader_successful_requests_total").increment(1);
-                        histogram!("rustfs_http_reader_request_setup_duration_seconds")
-                            .record(request_start.elapsed().as_secs_f64());
-                    }
-
-                    if !response.status().is_success() {
-                        #[cfg(feature = "metrics")]
-                        counter!("rustfs_http_reader_failed_requests_total").increment(1);
-
-                        return Err(Error::other(format!("HTTP request failed: url: {}, status: {}", url, response.status())));
-                    }
-
-                    // Extract content length for buffer optimization
-                    let content_length = response.content_length();
-
-                    #[cfg(feature = "metrics")]
-                    if let Some(length) = content_length {
-                        gauge!("rustfs_http_reader_content_length_bytes").set(length as f64);
-                    }
-
-                    http_log!("[HttpReader::new] Content-Length: {:?}", content_length);
-
-                    // Convert response to async stream with enhanced error handling
-                    let stream = response.bytes_stream().map_err(|e| {
-                        #[cfg(feature = "metrics")]
-                        counter!("rustfs_http_reader_stream_errors_total").increment(1);
-
-                        std::io::Error::new(std::io::ErrorKind::Other, e)
-                    });
-
-                    let boxed_stream: Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync>> = Box::pin(stream);
-
-                    let stream_reader = StreamReader::new(boxed_stream);
-
-                    Ok(Self {
-                        url,
-                        method,
-                        headers,
-                        inner: stream_reader,
-                        #[cfg(feature = "metrics")]
-                        bytes_downloaded: 0,
-                        #[cfg(feature = "metrics")]
-                        request_start_time: std::time::Instant::now(),
-                        #[cfg(feature = "metrics")]
-                        connection_reused: false, // TODO: Extract from response headers
-                    })
-                }
-                Err(e) => {
-                    http_log!("[HttpReader::new] Request error: {e}");
-
-                    #[cfg(feature = "metrics")]
-                    counter!("rustfs_http_reader_request_errors_total").increment(1);
-
-                    Err(Error::other(e.source().map(|s| s.to_string()).unwrap_or_else(|| e.to_string())))
-                }
-            }
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Get download statistics for monitoring
-    #[cfg(feature = "metrics")]
-    pub fn get_download_stats(&self) -> HttpDownloadStats {
-        HttpDownloadStats {
-            bytes_downloaded: self.bytes_downloaded,
-            elapsed_time: self.request_start_time.elapsed(),
-            connection_reused: self.connection_reused,
-            url: self.url.clone(),
-        }
     }
 }
 

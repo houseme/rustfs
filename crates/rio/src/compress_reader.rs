@@ -68,7 +68,7 @@ pin_project! {
 
 impl<R> CompressReader<R>
 where
-    R: Reader,
+    R: AsyncRead + Unpin + Send + Sync,
 {
     /// Create new CompressReader with enhanced buffering
     pub fn new(inner: R, compression_algorithm: CompressionAlgorithm) -> Self {
