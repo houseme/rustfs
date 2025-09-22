@@ -131,7 +131,7 @@ where
 
     /// Standard encryption method
     fn encrypt_standard(&mut self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        Self::encrypt_block_static(data, &self.key, &self.nonce)
+        Ok(Self::encrypt_block_static(&self.key, &self.nonce, data)?)
     }
 
     /// Advanced batch encryption with io_uring vectored operations
@@ -144,7 +144,7 @@ where
         #[cfg(feature = "metrics")]
         let start = std::time::Instant::now();
 
-        let _io_engine = get_io_engine().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let _io_engine = get_io_engine();
 
         // Use standard encryption (remove io_uring check due to private field access)
         let encrypted_data = self.encrypt_standard(data)

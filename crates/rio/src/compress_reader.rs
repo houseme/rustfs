@@ -232,7 +232,7 @@ where
                         // EOF - process what we have
                     } else {
                         this.temp_buffer.extend_from_slice(&temp_buf.filled());
-                        return this.poll_read(cx, buf); // Try again
+                        return this.inner.poll_read(cx, buf); // Try again
                     }
                 }
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),

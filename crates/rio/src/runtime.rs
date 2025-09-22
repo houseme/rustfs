@@ -219,6 +219,21 @@ impl RuntimeHandle {
         })
     }
 
+    /// Create a new runtime handle configured for Tokio
+    pub fn new_tokio() -> Self {
+        let config = RuntimeConfig {
+            runtime_type: RuntimeType::Tokio,
+            ..Default::default()
+        };
+        
+        Self {
+            runtime_type: RuntimeType::Tokio,
+            config,
+            #[cfg(feature = "io_uring")]
+            monoio_handle: None,
+        }
+    }
+
     #[cfg(feature = "io_uring")]
     fn init_monoio_runtime(config: &RuntimeConfig) -> Result<monoio::Runtime<monoio::FusionDriver>, RuntimeError> {
         // Initialize monoio with optimized configuration

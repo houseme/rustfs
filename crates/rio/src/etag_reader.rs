@@ -207,8 +207,8 @@ impl AsyncRead for EtagReader {
             let new_data = &buf.filled()[orig_filled..];
 
             if !new_data.is_empty() {
-                // Use optimized batch MD5 update
-                Self::batch_md5_update(&mut this.md5, new_data);
+                // Use optimized MD5 update directly on projection
+                this.md5.update(new_data);
 
                 tracing::trace!(bytes_read = new_data.len(), "EtagReader processed new data");
             } else {

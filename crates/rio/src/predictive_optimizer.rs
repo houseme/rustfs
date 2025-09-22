@@ -438,11 +438,11 @@ impl PredictiveOptimizer {
 
                 // Analyze patterns for changes and update confidence levels
                 let mut patterns_guard = patterns.write().await;
-                let current_time = Instant::now();
+                let current_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
 
                 // Decay confidence over time for patterns that haven't been observed recently
                 for pattern in patterns_guard.values_mut() {
-                    let time_since_update = current_time.duration_since(pattern.last_update);
+                    let time_since_update = current_time.saturating_sub(pattern.last_update);
                     if time_since_update > Duration::from_secs(300) {
                         // 5 minutes
                         pattern.confidence *= 0.9; // Decay by 10%
@@ -535,16 +535,17 @@ impl PredictiveOptimizer {
     /// Update access patterns based on observed access
     async fn update_access_patterns(&self, operation_type: &str, offset: u64, size: usize, timestamp: Instant) {
         let mut patterns = self.access_patterns.write().await;
+        let timestamp_duration = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
 
         let pattern = patterns.entry(operation_type.to_string()).or_insert_with(|| AccessPattern {
             pattern_type: AccessPatternType::Random { hotspot_ratio: 0.5 },
             confidence: 0.1,
             parameters: HashMap::new(),
-            last_update: timestamp,
+            last_update: timestamp_duration,
             observation_count: 0,
         });
 
-        pattern.last_update = timestamp;
+        pattern.last_update = timestamp_duration;
         pattern.observation_count += 1;
 
         // Simple pattern detection logic (would be more sophisticated in practice)
@@ -582,7 +583,7 @@ impl PredictiveOptimizer {
                 expected_improvement: 0.3, // 30% improvement expected
                 confidence: 0.85,
                 priority: 8,
-                apply_at: Instant::now(),
+                apply_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default(),
             });
         }
 
@@ -613,7 +614,7 @@ impl PredictiveOptimizer {
                 expected_improvement: 0.25, // 25% improvement expected
                 confidence: 0.75,
                 priority: 6,
-                apply_at: Instant::now(),
+                apply_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default(),
             });
         }
 
@@ -646,7 +647,7 @@ impl PredictiveOptimizer {
                 expected_improvement: 0.2, // 20% improvement expected
                 confidence: 0.7,
                 priority: 5,
-                apply_at: Instant::now(),
+                apply_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default(),
             });
         }
 
@@ -679,7 +680,7 @@ impl PredictiveOptimizer {
                 expected_improvement: 0.4, // 40% improvement expected
                 confidence: 0.8,
                 priority: 7,
-                apply_at: Instant::now(),
+                apply_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default(),
             });
         }
 
@@ -708,7 +709,7 @@ impl PredictiveOptimizer {
                 expected_improvement: 0.15,
                 confidence: model.accuracy,
                 priority: 4,
-                apply_at: Instant::now(),
+                apply_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default(),
             });
         }
 
