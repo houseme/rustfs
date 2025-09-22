@@ -143,8 +143,8 @@ where
         let io_engine = get_io_engine().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         // Use io_uring batch operations for large blocks
-        let encrypted_data = if io_engine.supports_zero_copy() && data.len() > ENCRYPTION_BLOCK_SIZE * 2 {
-            self.encrypt_vectored_io_uring(data)
+        let encrypted_data = if io_engine.runtime.supports_zero_copy() && data.len() > ENCRYPTION_BLOCK_SIZE * 2 {
+            Self::encrypt_vectored_io_uring_static(data, &self.key, &self.nonce)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
         } else {
             self.encrypt_standard(data)
@@ -222,76 +222,6 @@ where
         }
     }
 
-    /// Batch encrypt a block of data
-    fn batch_encrypt_block(&mut self, data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
-        self.encrypt_standard(data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-    }
-
-    /// Zero-copy vectored encryption using io_uring
-    #[cfg(feature = "io_uring")]
-    #[instrument(skip(self, data), fields(data_len = data.len()))]
-    fn encrypt_vectored_io_uring(&mut self, data: &[u8]) -> Result<Vec<u8>, aes_gcm::Error> {
-        const VECTORED_CHUNK_SIZE: usize = 32 * 1024; // 32KB chunks for optimal io_uring
-
-        if data.len() <= VECTORED_CHUNK_SIZE {
-            return self.encrypt_standard(data);
-        }
-
-        // Initialize cipher for batch operations
-        let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|_| aes_gcm::Error)?;
-
-        let mut encrypted_result = Vec::with_capacity(data.len() + ENCRYPTION_OVERHEAD * 16);
-
-        // Process chunks in vectored batches
-        for (chunk_index, chunk) in data.chunks(VECTORED_CHUNK_SIZE).enumerate() {
-            // Generate unique nonce for each chunk
-            let mut chunk_nonce = self.nonce;
-            let chunk_counter = self.block_counter.wrapping_add(chunk_index as u64);
-            chunk_nonce[8..].copy_from_slice(&chunk_counter.to_le_bytes());
-
-            let nonce = Nonce::from_slice(&chunk_nonce);
-            let encrypted_chunk = cipher.encrypt(nonce, chunk.as_ref())?;
-
-            // Write chunk header with length for framing
-            let mut chunk_header = Vec::with_capacity(16);
-            put_uvarint(&mut chunk_header, encrypted_chunk.len() as u64);
-            encrypted_result.extend_from_slice(&chunk_header);
-            encrypted_result.extend_from_slice(&encrypted_chunk);
-        }
-
-        // Update block counter for all processed chunks
-        self.block_counter = self
-            .block_counter
-            .wrapping_add((data.len() + VECTORED_CHUNK_SIZE - 1) / VECTORED_CHUNK_SIZE as u64);
-
-        #[cfg(feature = "metrics")]
-        {
-            counter!("rustfs_encrypt_reader_vectored_operations_total").increment(1);
-            histogram!("rustfs_encrypt_reader_vectored_chunk_count")
-                .record((data.len() + VECTORED_CHUNK_SIZE - 1) / VECTORED_CHUNK_SIZE);
-        }
-
-        Ok(encrypted_result)
-    }
-
-    /// Standard encryption for smaller blocks
-    #[instrument(skip(self, data), fields(data_len = data.len()))]
-    fn encrypt_standard(&mut self, data: &[u8]) -> Result<Vec<u8>, aes_gcm::Error> {
-        let cipher = Aes256Gcm::new_from_slice(&self.key).map_err(|_| aes_gcm::Error)?;
-
-        // Generate unique nonce using block counter
-        let nonce = self.generate_block_nonce();
-        let nonce_ref = Nonce::from_slice(&nonce);
-        let encrypted = cipher.encrypt(nonce_ref, data.as_ref())?;
-
-        // Add frame header for block identification
-        let mut result = Vec::with_capacity(encrypted.len() + 16);
-        put_uvarint(&mut result, encrypted.len() as u64);
-        result.extend_from_slice(&encrypted);
-
-        Ok(result)
-    }
 }
 
 impl<R> AsyncRead for EncryptReader<R>

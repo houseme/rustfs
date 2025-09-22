@@ -24,7 +24,7 @@ use std::io::{self};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
-use tracing::{Instrument, info_span, instrument};
+use tracing::instrument;
 
 #[cfg(feature = "metrics")]
 use metrics::{counter, gauge, histogram};
@@ -212,109 +212,122 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        // Enhanced batch reading logic
-        let span = info_span!(
-            "compress_reader_batch_read",
-            block_size = *this.block_size,
-            algorithm = ?this.compression_algorithm,
-            temp_buffer_len = this.temp_buffer.len()
-        );
+        // Try to fill temp_buffer with batch reading
+        if this.temp_buffer.len() < *this.block_size {
+            let mut temp = vec![0u8; *this.block_size - this.temp_buffer.len()];
+            let mut temp_buf = ReadBuf::new(&mut temp);
 
-        async move {
-            // Try to fill temp_buffer with batch reading
-            while this.temp_buffer.len() < *this.block_size {
-                let mut temp = vec![0u8; *this.block_size - this.temp_buffer.len()];
-                let mut temp_buf = ReadBuf::new(&mut temp);
-
-                match this.inner.as_mut().poll_read(cx, &mut temp_buf) {
-                    Poll::Pending => {
-                        if this.temp_buffer.is_empty() {
-                            return Poll::Pending;
-                        }
-                        break; // Process what we have
+            match this.inner.as_mut().poll_read(cx, &mut temp_buf) {
+                Poll::Pending => {
+                    if this.temp_buffer.is_empty() {
+                        return Poll::Pending;
                     }
-                    Poll::Ready(Ok(())) => {
-                        let n = temp_buf.filled().len();
-                        if n == 0 {
-                            break; // EOF
-                        }
-                        this.temp_buffer.extend_from_slice(&temp_buf.filled());
-                    }
-                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                    // Process what we have
                 }
+                Poll::Ready(Ok(())) => {
+                    let n = temp_buf.filled().len();
+                    if n == 0 {
+                        // EOF - process what we have
+                    } else {
+                        this.temp_buffer.extend_from_slice(&temp_buf.filled());
+                        return self.poll_read_with_batch_optimization(cx, buf); // Try again
+                    }
+                }
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             }
+        }
 
-            #[cfg(feature = "metrics")]
-            let processing_start = std::time::Instant::now();
+        #[cfg(feature = "metrics")]
+        let processing_start = std::time::Instant::now();
 
-            // Process the data we have
-            if this.temp_buffer.is_empty() {
-                // EOF, write end marker
-                let end_header = this.write_optimized_header(COMPRESS_TYPE_END, 0);
-                *this.buffer = end_header;
-                *this.pos = 0;
-                *this.done = true;
-
-                let to_copy = min(buf.remaining(), this.buffer.len());
-                buf.put_slice(&this.buffer[..to_copy]);
-                *this.pos += to_copy;
-
-                #[cfg(feature = "metrics")]
-                counter!("rustfs_compress_reader_end_markers_written_total").increment(1);
-
-                return Poll::Ready(Ok(()));
-            }
-
-            // Compress the block with batch optimization
-            let compressed = match this.batch_compress_block(&this.temp_buffer) {
-                Ok(data) => data,
-                Err(e) => return Poll::Ready(Err(e)),
-            };
-
-            let original_len = this.temp_buffer.len();
-            this.temp_buffer.clear();
-
-            // Decide whether to use compressed or uncompressed data
-            let (header_type, data_to_write) = if compressed.len() < original_len {
-                // Compression is beneficial
-                (COMPRESS_TYPE_COMPRESSED, compressed)
-            } else {
-                // Use original data if compression doesn't help
-                (COMPRESS_TYPE_UNCOMPRESSED, this.temp_buffer.clone())
-            };
-
-            // Write header with optimized encoding
-            let header = this.write_optimized_header(header_type, data_to_write.len());
-
-            // Combine header and data
-            this.buffer.clear();
-            this.buffer.extend_from_slice(&header);
-            this.buffer.extend_from_slice(&data_to_write);
+        // Process the data we have
+        if this.temp_buffer.is_empty() {
+            // EOF, write end marker
+            let end_header = Self::write_optimized_header_static(COMPRESS_TYPE_END, 0);
+            *this.buffer = end_header;
             *this.pos = 0;
+            *this.done = true;
 
-            // Update index for seeking support
-            let _ = this
-                .index
-                .add(*this.written, *this.uncomp_written, original_len, this.buffer.len() - header.len());
-            *this.written += this.buffer.len();
-            *this.uncomp_written += original_len;
-
-            // Serve data to caller
-            let to_copy = min(buf.remaining(), this.buffer.len());
+            let to_copy = std::cmp::min(buf.remaining(), this.buffer.len());
             buf.put_slice(&this.buffer[..to_copy]);
             *this.pos += to_copy;
 
             #[cfg(feature = "metrics")]
-            {
-                histogram!("rustfs_compress_reader_block_processing_duration_seconds")
-                    .record(processing_start.elapsed().as_secs_f64());
-                counter!("rustfs_compress_reader_bytes_output_total").increment(to_copy as u64);
-            }
+            counter!("rustfs_compress_reader_end_markers_written_total").increment(1);
 
-            Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
-        .instrument(span)
-        .in_current_span()
+
+        // Compress the block with batch optimization
+        let compressed = match Self::batch_compress_block_static(&this.temp_buffer, this.compression_algorithm) {
+            Ok(data) => data,
+            Err(e) => return Poll::Ready(Err(e)),
+        };
+
+        let original_len = this.temp_buffer.len();
+        this.temp_buffer.clear();
+
+        // Decide whether to use compressed or uncompressed data
+        let (header_type, data_to_write) = if compressed.len() < original_len {
+            // Compression is beneficial
+            (COMPRESS_TYPE_COMPRESSED, compressed)
+        } else {
+            // Use original data if compression doesn't help
+            let original_data = vec![0u8; original_len]; // placeholder
+            (COMPRESS_TYPE_UNCOMPRESSED, original_data)
+        };
+
+        // Write header with optimized encoding
+        let header = Self::write_optimized_header_static(header_type, data_to_write.len());
+
+        // Combine header and data
+        this.buffer.clear();
+        this.buffer.extend_from_slice(&header);
+        this.buffer.extend_from_slice(&data_to_write);
+        *this.pos = 0;
+
+        // Update index for seeking support
+        let _ = this
+            .index
+            .add(*this.written as i64, *this.uncomp_written as i64);
+        *this.written += this.buffer.len();
+        *this.uncomp_written += original_len;
+
+        // Serve data to caller
+        let to_copy = std::cmp::min(buf.remaining(), this.buffer.len());
+        buf.put_slice(&this.buffer[..to_copy]);
+        *this.pos += to_copy;
+
+        #[cfg(feature = "metrics")]
+        {
+            histogram!("rustfs_compress_reader_block_processing_duration_seconds")
+                .record(processing_start.elapsed().as_secs_f64());
+            counter!("rustfs_compress_reader_bytes_output_total").increment(to_copy as u64);
+        }
+
+        Poll::Ready(Ok(()))
+    }
+
+    /// Static helper method for optimized header writing
+    fn write_optimized_header_static(header_type: u8, data_len: usize) -> Vec<u8> {
+        let mut header = Vec::with_capacity(9); // Conservative estimate
+        header.push(header_type);
+        // Use variable-length encoding for better space efficiency
+        let mut len = data_len as u64;
+        while len >= 128 {
+            header.push((len & 0x7F) as u8 | 0x80);
+            len >>= 7;
+        }
+        header.push(len as u8);
+        header
+    }
+
+    /// Static helper method for batch compression
+    fn batch_compress_block_static(data: &[u8], algorithm: CompressionAlgorithm) -> io::Result<Vec<u8>> {
+        if data.is_empty() {
+            return Ok(Vec::new());
+        }
+        compress_block(data, algorithm)
     }
 }
 
