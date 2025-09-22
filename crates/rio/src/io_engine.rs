@@ -23,10 +23,10 @@ use anyhow::Result;
 use std::io::IoSliceMut;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, ReadBuf};
-use tracing::{info_span, instrument, Instrument};
+use tracing::{Instrument, info_span, instrument};
 
 #[cfg(feature = "metrics")]
-use metrics::{counter, histogram, gauge};
+use metrics::{counter, gauge, histogram};
 
 /// Advanced I/O engine providing zero-copy and batch operations
 pub struct IoEngine {
@@ -107,17 +107,12 @@ impl IoEngine {
 
     /// Perform zero-copy read operation with advanced buffering
     #[instrument(skip(self, reader, buf), fields(buf_len = buf.capacity()))]
-    pub async fn zero_copy_read<R>(
-        &self,
-        mut reader: R,
-        buf: &mut Vec<u8>,
-        hint_size: Option<usize>,
-    ) -> Result<usize>
+    pub async fn zero_copy_read<R>(&self, mut reader: R, buf: &mut Vec<u8>, hint_size: Option<usize>) -> Result<usize>
     where
         R: AsyncRead + Unpin + Send,
     {
         let _permit = self.global_semaphore.acquire().await;
-        
+
         // Pre-allocate buffer with capacity hint for zero-copy optimization
         if let Some(size) = hint_size {
             buf.reserve(size);
@@ -166,11 +161,7 @@ impl IoEngine {
 
     /// Perform vectored I/O operations for batch efficiency
     #[instrument(skip(self, reader, buffers), fields(buffer_count = buffers.len()))]
-    pub async fn vectored_read<R>(
-        &self,
-        mut reader: R,
-        buffers: &mut [IoSliceMut<'_>],
-    ) -> Result<usize>
+    pub async fn vectored_read<R>(&self, mut reader: R, buffers: &mut [IoSliceMut<'_>]) -> Result<usize>
     where
         R: AsyncRead + Unpin + Send,
     {
@@ -221,25 +212,22 @@ impl IoEngine {
         }
 
         let batch_size = operations.len();
-        
+
         #[cfg(feature = "metrics")]
         {
             *self.metrics.batch_queue_depth.lock() = batch_size;
             gauge!("rustfs_io_engine_batch_queue_depth").set(batch_size as f64);
         }
 
-        tracing::debug!(
-            batch_size = batch_size,
-            "Submitting batch operations to io_uring queue"
-        );
+        tracing::debug!(batch_size = batch_size, "Submitting batch operations to io_uring queue");
 
         // In a full implementation, this would submit all operations
         // to io_uring's submission queue (SQE) and await completion queue (CQE)
         let results = Vec::with_capacity(batch_size);
-        
+
         // TODO: Implement actual io_uring batch submission
         // This would use monoio's runtime to submit multiple operations atomically
-        
+
         #[cfg(feature = "metrics")]
         counter!("rustfs_io_engine_batch_operations_total").increment(batch_size as u64);
 
@@ -255,10 +243,10 @@ impl IoEngine {
         // In a full implementation, this would use monoio's AsyncReadRent
         // for true zero-copy operations with io_uring
         tracing::debug!("Monoio zero-copy read operation (placeholder)");
-        
+
         // TODO: Implement monoio::io::AsyncReadRent integration
         // let (result, buf_slice) = reader.read(buf_slice).await;
-        
+
         Ok(0) // Placeholder
     }
 
@@ -270,10 +258,10 @@ impl IoEngine {
     {
         // In a full implementation, this would use io_uring's readv
         tracing::debug!("Monoio vectored read operation (placeholder)");
-        
+
         // TODO: Implement monoio readv operation
         // This would submit multiple buffer reads in a single syscall
-        
+
         Ok(0) // Placeholder
     }
 

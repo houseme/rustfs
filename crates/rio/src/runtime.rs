@@ -88,12 +88,12 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             runtime_type: Self::detect_best_runtime(),
-            worker_threads: None, // Use system default
+            worker_threads: None,             // Use system default
             max_blocking_threads: Some(1024), // Increase from default for high file I/O
             thread_local: true,
             io_timeout: std::time::Duration::from_secs(30), // 30 second timeout
-            buffer_size: 64 * 1024, // 64KB default buffer
-            high_priority: false, // Don't interfere with system by default
+            buffer_size: 64 * 1024,                         // 64KB default buffer
+            high_priority: false,                           // Don't interfere with system by default
         }
     }
 }
@@ -117,7 +117,7 @@ impl RuntimeConfig {
                     _ => tracing::warn!("Unknown runtime type in RUSTFS_FORCE_RUNTIME: {}", override_val),
                 }
             }
-            
+
             // Check if io_uring is available on this Linux system
             if Self::is_io_uring_available() {
                 tracing::info!("io_uring detected and available, using Monoio runtime");
@@ -126,15 +126,15 @@ impl RuntimeConfig {
                 tracing::info!("io_uring not available, using Tokio runtime");
             }
         }
-        
+
         #[cfg(not(all(feature = "io_uring", target_os = "linux")))]
         {
             tracing::debug!("Non-Linux platform or io_uring feature disabled, using Tokio runtime");
         }
-        
+
         RuntimeType::Tokio
     }
-    
+
     /// Check if io_uring is available on the current system
     /// This performs a runtime check to ensure io_uring is properly supported
     #[cfg(all(feature = "io_uring", target_os = "linux"))]
@@ -142,7 +142,7 @@ impl RuntimeConfig {
         // Check kernel version and capabilities for io_uring support
         // This is a more robust check than just opening /dev/null
         use std::fs;
-        
+
         // Check if io_uring is supported by examining proc/version
         if let Ok(version) = fs::read_to_string("/proc/version") {
             // io_uring requires Linux 5.1+, but for stability we recommend 5.4+
@@ -154,18 +154,18 @@ impl RuntimeConfig {
                 }
             }
         }
-        
+
         // Fallback check
         Self::test_io_uring_syscall()
     }
-    
+
     /// Test if io_uring syscalls are available
     #[cfg(all(feature = "io_uring", target_os = "linux"))]
     fn test_io_uring_syscall() -> bool {
         // Try to create a minimal io_uring instance
         // This is safer than assuming availability
         use std::fs;
-        
+
         // Check if we can access the required system resources
         if let Ok(_) = fs::File::open("/dev/null") {
             // In a production implementation, we would try:
@@ -176,7 +176,7 @@ impl RuntimeConfig {
             false
         }
     }
-    
+
     #[cfg(not(all(feature = "io_uring", target_os = "linux")))]
     fn is_io_uring_available() -> bool {
         false
@@ -196,7 +196,7 @@ impl RuntimeHandle {
     /// Create a new runtime handle with the specified configuration
     pub fn new(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         let runtime_type = config.runtime_type;
-        
+
         #[cfg(feature = "io_uring")]
         let monoio_handle = if matches!(runtime_type, RuntimeType::Monoio) {
             // Try to initialize monoio runtime
@@ -210,7 +210,7 @@ impl RuntimeHandle {
         } else {
             None
         };
-        
+
         Ok(Self {
             runtime_type,
             config,
@@ -218,31 +218,32 @@ impl RuntimeHandle {
             monoio_handle,
         })
     }
-    
+
     #[cfg(feature = "io_uring")]
     fn init_monoio_runtime(config: &RuntimeConfig) -> Result<monoio::Runtime<monoio::FusionDriver>, RuntimeError> {
         // Initialize monoio with optimized configuration
         let mut builder = monoio::RuntimeBuilder::<monoio::FusionDriver>::new();
-        
+
         // Configure for optimal I/O performance
         if config.thread_local {
             builder.enable_timer().enable_all();
         }
-        
-        builder.build()
+
+        builder
+            .build()
             .map_err(|e| RuntimeError::InitializationFailed(format!("Monoio runtime init failed: {}", e)))
     }
-    
+
     /// Get the current runtime type
     pub fn runtime_type(&self) -> RuntimeType {
         self.runtime_type
     }
-    
+
     /// Get runtime configuration
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
     }
-    
+
     /// Check if the current runtime supports zero-copy operations
     pub fn supports_zero_copy(&self) -> bool {
         match self.runtime_type {
@@ -251,7 +252,7 @@ impl RuntimeHandle {
             RuntimeType::Monoio => self.monoio_handle.is_some(),
         }
     }
-    
+
     /// Check if the runtime is properly initialized and healthy
     pub fn is_healthy(&self) -> bool {
         match self.runtime_type {
@@ -260,12 +261,10 @@ impl RuntimeHandle {
                 tokio::runtime::Handle::try_current().is_ok()
             }
             #[cfg(feature = "io_uring")]
-            RuntimeType::Monoio => {
-                self.monoio_handle.is_some()
-            }
+            RuntimeType::Monoio => self.monoio_handle.is_some(),
         }
     }
-    
+
     /// Spawn a future on the current runtime with enhanced error handling
     pub fn spawn<F>(&self, future: F) -> Result<RuntimeJoinHandle<F::Output>, RuntimeError>
     where
@@ -275,7 +274,7 @@ impl RuntimeHandle {
         if !self.is_healthy() {
             return Err(RuntimeError::RuntimeUnavailable);
         }
-        
+
         match self.runtime_type {
             RuntimeType::Tokio => {
                 let handle = tokio::spawn(future);
@@ -297,7 +296,7 @@ impl RuntimeHandle {
             }
         }
     }
-    
+
     /// Execute a future with timeout and error recovery
     pub async fn execute_with_timeout<F, T>(&self, future: F, timeout: std::time::Duration) -> Result<T, RuntimeError>
     where
@@ -320,20 +319,16 @@ pub enum RuntimeJoinHandle<T> {
 
 impl<T> Future for RuntimeJoinHandle<T> {
     type Output = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-    
+
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.get_mut() {
-            RuntimeJoinHandle::Tokio(handle) => {
-                match Pin::new(handle).poll(cx) {
-                    Poll::Ready(Ok(result)) => Poll::Ready(Ok(result)),
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(Box::new(e))),
-                    Poll::Pending => Poll::Pending,
-                }
-            }
+            RuntimeJoinHandle::Tokio(handle) => match Pin::new(handle).poll(cx) {
+                Poll::Ready(Ok(result)) => Poll::Ready(Ok(result)),
+                Poll::Ready(Err(e)) => Poll::Ready(Err(Box::new(e))),
+                Poll::Pending => Poll::Pending,
+            },
             #[cfg(feature = "io_uring")]
-            RuntimeJoinHandle::Monoio(handle) => {
-                Pin::new(handle).poll(cx)
-            }
+            RuntimeJoinHandle::Monoio(handle) => Pin::new(handle).poll(cx),
         }
     }
 }
@@ -355,14 +350,14 @@ pub fn init_runtime_with_config(config: RuntimeConfig) -> Result<RuntimeHandle, 
             false
         }
     };
-    
+
     tracing::info!(
         "Initializing RustFS Rio runtime: {:?} (zero_copy: {}, timeout: {:?})",
         config.runtime_type,
         zero_copy_support,
         config.io_timeout
     );
-    
+
     match config.runtime_type {
         RuntimeType::Tokio => {
             tracing::info!(
@@ -380,19 +375,19 @@ pub fn init_runtime_with_config(config: RuntimeConfig) -> Result<RuntimeHandle, 
             // Additional validation will be done in RuntimeHandle::new
         }
     }
-    
+
     RuntimeHandle::new(config)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_runtime_detection() {
         let config = RuntimeConfig::default();
         let handle = RuntimeHandle::new(config).unwrap();
-        
+
         // Should detect appropriate runtime
         match handle.runtime_type() {
             RuntimeType::Tokio => {
@@ -405,11 +400,11 @@ mod tests {
             }
         }
     }
-    
+
     #[tokio::test]
     async fn test_runtime_spawn() {
         let handle = init_runtime().unwrap();
-        
+
         let result = handle.spawn(async { 42 }).unwrap().await;
         assert_eq!(result.unwrap(), 42);
     }

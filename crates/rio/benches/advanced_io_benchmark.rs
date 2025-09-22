@@ -14,10 +14,10 @@
 
 //! Advanced I/O benchmarks demonstrating io_uring optimization and reader pipeline performance
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use rustfs_rio::{
-    init_runtime_with_config, AsyncFile, CompressReader, DiskFile, EncryptReader, EtagReader, RuntimeConfig, RuntimeType
-    , WarpReader,
+    AsyncFile, CompressReader, DiskFile, EncryptReader, EtagReader, RuntimeConfig, RuntimeType, WarpReader,
+    init_runtime_with_config,
 };
 use rustfs_utils::compress::CompressionAlgorithm;
 use std::io::Cursor;

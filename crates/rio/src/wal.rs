@@ -25,10 +25,10 @@ use bytes::{Bytes, BytesMut};
 use std::collections::VecDeque;
 use std::io::{Error as IoError, Result as IoResult};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::interval;
 use tracing::{debug, error, instrument};
 

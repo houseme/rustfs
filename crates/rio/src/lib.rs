@@ -285,11 +285,11 @@ pub use etag::EtagResolvable;
 
 // Re-export enhanced runtime functionality
 pub use disk::{AsyncFile, DiskFile};
-pub use runtime::{init_runtime, init_runtime_with_config, RuntimeConfig, RuntimeError, RuntimeHandle, RuntimeType};
+pub use runtime::{RuntimeConfig, RuntimeError, RuntimeHandle, RuntimeType, init_runtime, init_runtime_with_config};
 pub use wal::{Wal, WalConfig, WalEntry};
 
 // Re-export advanced I/O engine
-pub use io_engine::{get_io_engine, init_io_engine, IoEngine};
+pub use io_engine::{IoEngine, get_io_engine, init_io_engine};
 
 #[cfg(feature = "metrics")]
 pub use io_engine::IoEngineStats;

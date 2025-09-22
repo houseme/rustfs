@@ -17,14 +17,14 @@ use crate::{EtagResolvable, HashReaderDetector};
 use crate::{HashReaderMut, Reader};
 
 use pin_project_lite::pin_project;
-use rustfs_utils::compress::{compress_block, decompress_block, CompressionAlgorithm};
+use rustfs_utils::compress::{CompressionAlgorithm, compress_block, decompress_block};
 use rustfs_utils::{put_uvarint, uvarint};
 use std::cmp::min;
 use std::io::{self};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
-use tracing::{info_span, instrument, Instrument};
+use tracing::{Instrument, info_span, instrument};
 
 #[cfg(feature = "metrics")]
 use metrics::{counter, gauge, histogram};

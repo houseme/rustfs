@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::compress_index::{Index, TryGetIndex};
-use crate::io_engine::get_io_engine;
 use crate::HashReaderDetector;
 use crate::HashReaderMut;
+use crate::compress_index::{Index, TryGetIndex};
+use crate::io_engine::get_io_engine;
 use crate::{EtagResolvable, Reader};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};

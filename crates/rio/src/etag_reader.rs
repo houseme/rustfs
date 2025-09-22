@@ -20,7 +20,7 @@ use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
-use tracing::{info_span, instrument, Instrument};
+use tracing::{Instrument, info_span, instrument};
 
 #[cfg(feature = "metrics")]
 use metrics::{counter, gauge, histogram};

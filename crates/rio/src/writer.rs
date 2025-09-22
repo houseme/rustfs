@@ -24,9 +24,7 @@ pub struct HttpWriter {
 
 impl HttpWriter {
     pub fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-        }
+        Self { buffer: Vec::new() }
     }
 }
 
@@ -37,11 +35,7 @@ impl Default for HttpWriter {
 }
 
 impl AsyncWrite for HttpWriter {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<IoResult<usize>> {
+    fn poll_write(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
         self.buffer.extend_from_slice(buf);
         Poll::Ready(Ok(buf.len()))
     }

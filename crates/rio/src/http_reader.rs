@@ -27,7 +27,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use tokio_util::io::StreamReader;
-use tracing::{info_span, instrument, Instrument};
+use tracing::{Instrument, info_span, instrument};
 
 use crate::io_engine::get_io_engine;
 use crate::{EtagResolvable, HashReaderDetector, HashReaderMut};

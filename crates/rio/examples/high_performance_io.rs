@@ -18,20 +18,15 @@
 //! including runtime detection, file operations, and WAL usage.
 
 use bytes::Bytes;
-use rustfs_rio::{
-    init_runtime, init_runtime_with_config, DiskFile, RuntimeConfig, RuntimeType, 
-    Wal, WalConfig, AsyncFile
-};
+use rustfs_rio::{AsyncFile, DiskFile, RuntimeConfig, RuntimeType, Wal, WalConfig, init_runtime, init_runtime_with_config};
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{info, Level};
+use tracing::{Level, info};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing for observability
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     info!("Starting RustFS Rio high-performance I/O example");
 
@@ -94,27 +89,27 @@ async fn demonstrate_file_operations() -> Result<(), Box<dyn std::error::Error>>
     // Create and write to file
     let start = Instant::now();
     let mut file = DiskFile::create(&file_path, runtime.clone()).await?;
-    
+
     // Write data in chunks to demonstrate performance
     let chunk_size = 64 * 1024; // 64KB chunks
     let num_chunks = 100;
     let data = vec![42u8; chunk_size];
-    
+
     info!("Writing {} chunks of {} bytes each", num_chunks, chunk_size);
-    
+
     for i in 0..num_chunks {
         let offset = (i * chunk_size) as u64;
         let written = file.write_object(&data, offset).await?;
         assert_eq!(written, chunk_size);
     }
-    
+
     // Ensure data is written to disk
     file.sync_all().await?;
     let write_duration = start.elapsed();
-    
+
     let total_bytes = num_chunks * chunk_size;
     let write_throughput = (total_bytes as f64) / write_duration.as_secs_f64() / 1024.0 / 1024.0;
-    
+
     info!(
         "Write completed: {} MB in {:?} ({:.2} MB/s)",
         total_bytes / 1024 / 1024,
@@ -127,9 +122,9 @@ async fn demonstrate_file_operations() -> Result<(), Box<dyn std::error::Error>>
     // Read back the data
     let start = Instant::now();
     let mut file = DiskFile::open(&file_path, runtime).await?;
-    
+
     info!("Reading back {} chunks", num_chunks);
-    
+
     for i in 0..num_chunks {
         let offset = (i * chunk_size) as u64;
         let mut buffer = vec![0u8; chunk_size];
@@ -137,10 +132,10 @@ async fn demonstrate_file_operations() -> Result<(), Box<dyn std::error::Error>>
         assert_eq!(read, chunk_size);
         assert_eq!(buffer, data); // Verify data integrity
     }
-    
+
     let read_duration = start.elapsed();
     let read_throughput = (total_bytes as f64) / read_duration.as_secs_f64() / 1024.0 / 1024.0;
-    
+
     info!(
         "Read completed: {} MB in {:?} ({:.2} MB/s)",
         total_bytes / 1024 / 1024,
@@ -161,10 +156,10 @@ async fn demonstrate_wal_operations() -> Result<(), Box<dyn std::error::Error>> 
 
     // Configure WAL for optimal performance
     let wal_config = WalConfig {
-        batch_size: 50, // Batch up to 50 entries
+        batch_size: 50,                                     // Batch up to 50 entries
         flush_timeout: std::time::Duration::from_millis(5), // Flush after 5ms
-        sync_after_batch: true, // Ensure durability
-        buffer_size: 128 * 1024, // 128KB buffer
+        sync_after_batch: true,                             // Ensure durability
+        buffer_size: 128 * 1024,                            // 128KB buffer
     };
 
     let wal = Wal::new(&wal_path, runtime, wal_config).await?;
@@ -172,7 +167,7 @@ async fn demonstrate_wal_operations() -> Result<(), Box<dyn std::error::Error>> 
     // Single entry operations
     info!("Testing single WAL entries");
     let start = Instant::now();
-    
+
     for i in 0..100 {
         let data = Bytes::from(format!("Entry number {}", i));
         let sequence = wal.append(data).await?;
@@ -180,7 +175,7 @@ async fn demonstrate_wal_operations() -> Result<(), Box<dyn std::error::Error>> 
             info!("First entry sequence: {}", sequence);
         }
     }
-    
+
     wal.flush().await?;
     let single_duration = start.elapsed();
     info!("Single entries: 100 entries in {:?}", single_duration);
@@ -188,14 +183,12 @@ async fn demonstrate_wal_operations() -> Result<(), Box<dyn std::error::Error>> 
     // Batch operations
     info!("Testing batch WAL entries");
     let start = Instant::now();
-    
-    let batch_entries: Vec<Bytes> = (0..100)
-        .map(|i| Bytes::from(format!("Batch entry {}", i)))
-        .collect();
-    
+
+    let batch_entries: Vec<Bytes> = (0..100).map(|i| Bytes::from(format!("Batch entry {}", i))).collect();
+
     let sequences = wal.append_batch(batch_entries).await?;
     wal.flush().await?;
-    
+
     let batch_duration = start.elapsed();
     info!(
         "Batch entries: 100 entries in {:?} (sequences: {}-{})",
@@ -207,7 +200,7 @@ async fn demonstrate_wal_operations() -> Result<(), Box<dyn std::error::Error>> 
     // Compare performance
     let single_rate = 100.0 / single_duration.as_secs_f64();
     let batch_rate = 100.0 / batch_duration.as_secs_f64();
-    
+
     info!(
         "Performance comparison: Single={:.0} entries/sec, Batch={:.0} entries/sec ({:.1}x faster)",
         single_rate,
@@ -224,15 +217,17 @@ async fn demonstrate_concurrent_operations() -> Result<(), Box<dyn std::error::E
 
     let runtime = init_runtime();
     let temp_dir = tempfile::tempdir()?;
-    
+
     // Test concurrent file writes
     let num_tasks = 16;
     let writes_per_task = 50;
     let data_size = 32 * 1024; // 32KB per write
-    
+
     info!(
         "Starting {} concurrent tasks, {} writes each ({} KB per write)",
-        num_tasks, writes_per_task, data_size / 1024
+        num_tasks,
+        writes_per_task,
+        data_size / 1024
     );
 
     let start = Instant::now();
@@ -240,20 +235,20 @@ async fn demonstrate_concurrent_operations() -> Result<(), Box<dyn std::error::E
         .map(|task_id| {
             let runtime = runtime.clone();
             let temp_dir = temp_dir.path().to_owned();
-            
+
             tokio::spawn(async move {
                 let file_path = temp_dir.join(format!("concurrent_{}.dat", task_id));
                 let mut file = DiskFile::create(&file_path, runtime).await?;
-                
+
                 let data = vec![task_id as u8; data_size];
                 let mut total_written = 0;
-                
+
                 for write_id in 0..writes_per_task {
                     let offset = (write_id * data_size) as u64;
                     let written = file.write_object(&data, offset).await?;
                     total_written += written;
                 }
-                
+
                 file.sync_all().await?;
                 Ok::<usize, Box<dyn std::error::Error + Send + Sync>>(total_written)
             })
@@ -263,11 +258,11 @@ async fn demonstrate_concurrent_operations() -> Result<(), Box<dyn std::error::E
     // Wait for all tasks to complete
     let results = futures::future::join_all(tasks).await;
     let duration = start.elapsed();
-    
+
     // Calculate statistics
     let mut total_bytes = 0;
     let mut successful_tasks = 0;
-    
+
     for result in results {
         match result {
             Ok(Ok(bytes)) => {
@@ -278,10 +273,10 @@ async fn demonstrate_concurrent_operations() -> Result<(), Box<dyn std::error::E
             Err(e) => info!("Task panicked: {}", e),
         }
     }
-    
+
     let throughput = (total_bytes as f64) / duration.as_secs_f64() / 1024.0 / 1024.0;
     let iops = (successful_tasks * writes_per_task) as f64 / duration.as_secs_f64();
-    
+
     info!(
         "Concurrent write results: {} successful tasks, {} MB total, {:.2} MB/s, {:.0} IOPS",
         successful_tasks,
@@ -295,18 +290,18 @@ async fn demonstrate_concurrent_operations() -> Result<(), Box<dyn std::error::E
     for task_id in 0..successful_tasks {
         let file_path = temp_dir.path().join(format!("concurrent_{}.dat", task_id));
         let mut file = DiskFile::open(&file_path, runtime.clone()).await?;
-        
+
         let expected_data = vec![task_id as u8; data_size];
         for write_id in 0..writes_per_task {
             let offset = (write_id * data_size) as u64;
             let mut buffer = vec![0u8; data_size];
             let read = file.read_object(&mut buffer, offset).await?;
-            
+
             assert_eq!(read, data_size);
             assert_eq!(buffer, expected_data);
         }
     }
-    
+
     info!("Data integrity verified for all {} tasks", successful_tasks);
 
     Ok(())
