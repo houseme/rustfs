@@ -20,7 +20,7 @@ use crate::io_engine::{get_io_engine};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use pin_project_lite::pin_project;
-use rustfs_utils::{put_uvarint, put_uvarint_len};
+use rustfs_utils::put_uvarint;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
@@ -334,10 +334,6 @@ impl<R> EtagResolvable for EncryptReader<R>
 where
     R: AsyncRead + Unpin + Send + Sync + EtagResolvable,
 {
-    fn is_etag_reader(&self) -> bool {
-        self.inner.is_etag_reader()
-    }
-
     fn try_resolve_etag(&mut self) -> Option<String> {
         self.inner.try_resolve_etag()
     }

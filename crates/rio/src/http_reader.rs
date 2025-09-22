@@ -19,13 +19,13 @@ use pin_project_lite::pin_project;
 use reqwest::{Client, Method, RequestBuilder};
 use std::error::Error as _;
 use std::io::{self, Error};
-use std::ops::Not as _;
+
 use std::pin::Pin;
 use std::sync::LazyLock;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::sync::mpsc;
+
 use tokio_util::io::StreamReader;
 use tracing::{info_span, instrument, Instrument};
 
@@ -176,6 +176,7 @@ impl HttpReader {
             headers,
             inner: stream_reader,
             bytes_downloaded: 0,
+            #[cfg(feature = "metrics")]
             request_start_time: request_start,
             connection_reused,
         })
@@ -433,10 +434,6 @@ impl AsyncWrite for HttpReader {
 }
 
 impl EtagResolvable for HttpReader {
-    fn is_etag_reader(&self) -> bool {
-        false
-    }
-
     fn try_resolve_etag(&mut self) -> Option<String> {
         None
     }
@@ -560,83 +557,6 @@ pub struct HttpDownloadStats {
     pub elapsed_time: Duration,
     pub connection_reused: bool,
     pub url: String,
-}
-
-impl AsyncRead for HttpReader {
-    #[instrument(skip(self, cx, buf), fields(buf_remaining = buf.remaining()))]
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        let mut this = self.project();
-        
-        let original_filled = buf.filled().len();
-        
-        let poll_result = this.inner.as_mut().poll_read(cx, buf);
-        
-        // Track bytes downloaded for metrics
-        #[cfg(feature = "metrics")]
-        if let Poll::Ready(Ok(())) = &poll_result {
-            let bytes_read = buf.filled().len() - original_filled;
-            if bytes_read > 0 {
-                *this.bytes_downloaded += bytes_read as u64;
-                
-                counter!("rustfs_http_reader_bytes_downloaded_total")
-                    .increment(bytes_read as u64);
-                
-                // Calculate and report download speed
-                let elapsed = this.request_start_time.elapsed();
-                if elapsed.as_secs() > 0 {
-                    let speed_mbps = (*this.bytes_downloaded as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
-                    gauge!("rustfs_http_reader_download_speed_mbps").set(speed_mbps);
-                }
-                
-                tracing::trace!(
-                    bytes_read = bytes_read,
-                    total_downloaded = *this.bytes_downloaded,
-                    url = %this.url,
-                    "HTTP data received"
-                );
-            }
-        }
-        
-        poll_result
-    }
-}
-
-impl AsyncWrite for HttpReader {
-    fn poll_write(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: &[u8]) -> Poll<io::Result<usize>> {
-        // HttpReader is read-only
-        Poll::Ready(Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "HttpReader does not support writing"
-        )))
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-}
-
-impl EtagResolvable for HttpReader {
-    fn is_etag_reader(&self) -> bool {
-        false
-    }
-
-    fn try_resolve_etag(&mut self) -> Option<String> {
-        None
-    }
-}
-
-impl HashReaderDetector for HttpReader {
-    fn is_hash_reader(&self) -> bool {
-        false
-    }
-
-    fn as_hash_reader_mut(&mut self) -> Option<&mut dyn HashReaderMut> {
-        None
-    }
 }
 
 #[cfg(test)]

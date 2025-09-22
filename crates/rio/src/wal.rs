@@ -26,7 +26,7 @@ use std::collections::VecDeque;
 use std::io::{Error as IoError, Result as IoResult};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::interval;

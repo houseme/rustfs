@@ -15,7 +15,7 @@
 use crate::compress_index::{Index, TryGetIndex};
 use crate::{EtagResolvable, HashReaderDetector};
 use crate::{HashReaderMut, Reader};
-use crate::io_engine::{get_io_engine};
+
 use pin_project_lite::pin_project;
 use rustfs_utils::compress::{CompressionAlgorithm, compress_block, decompress_block};
 use rustfs_utils::{put_uvarint, uvarint};
@@ -336,18 +336,7 @@ where
     }
 }
 
-impl<R> EtagResolvable for CompressReader<R>
-where
-    R: AsyncRead + Unpin + Send + Sync + EtagResolvable,
-{
-    fn is_etag_reader(&self) -> bool {
-        self.inner.is_etag_reader()
-    }
 
-    fn try_resolve_etag(&mut self) -> Option<String> {
-        self.inner.try_resolve_etag()
-    }
-}
 
 impl<R> HashReaderDetector for CompressReader<R>
 where
@@ -446,80 +435,7 @@ mod tests {
     }
 }
 
-impl<R> AsyncRead for CompressReader<R>
-where
-    R: AsyncRead + Unpin + Send + Sync,
-{
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        let mut this = self.project();
-        // Copy from buffer first if available
-        if *this.pos < this.buffer.len() {
-            let to_copy = min(buf.remaining(), this.buffer.len() - *this.pos);
-            buf.put_slice(&this.buffer[*this.pos..*this.pos + to_copy]);
-            *this.pos += to_copy;
-            if *this.pos == this.buffer.len() {
-                this.buffer.clear();
-                *this.pos = 0;
-            }
-            return Poll::Ready(Ok(()));
-        }
-        if *this.done {
-            return Poll::Ready(Ok(()));
-        }
-        // Fill temporary buffer
-        while this.temp_buffer.len() < *this.block_size {
-            let remaining = *this.block_size - this.temp_buffer.len();
-            let mut temp = vec![0u8; remaining];
-            let mut temp_buf = ReadBuf::new(&mut temp);
-            match this.inner.as_mut().poll_read(cx, &mut temp_buf) {
-                Poll::Pending => {
-                    if this.temp_buffer.is_empty() {
-                        return Poll::Pending;
-                    }
-                    break;
-                }
-                Poll::Ready(Ok(())) => {
-                    let n = temp_buf.filled().len();
-                    if n == 0 {
-                        if this.temp_buffer.is_empty() {
-                            return Poll::Ready(Ok(()));
-                        }
-                        break;
-                    }
-                    this.temp_buffer.extend_from_slice(&temp[..n]);
-                }
-                Poll::Ready(Err(e)) => {
-                    // error!("CompressReader poll_read: read inner error: {e}");
-                    return Poll::Ready(Err(e));
-                }
-            }
-        }
-        // Process accumulated data
-        if !this.temp_buffer.is_empty() {
-            let uncompressed_data = &this.temp_buffer;
-            let out = build_compressed_block(uncompressed_data, *this.compression_algorithm);
-            *this.written += out.len();
-            *this.uncomp_written += uncompressed_data.len();
-            if let Err(e) = this.index.add(*this.written as i64, *this.uncomp_written as i64) {
-                // error!("CompressReader index add error: {e}");
-                return Poll::Ready(Err(e));
-            }
-            *this.buffer = out;
-            *this.pos = 0;
-            this.temp_buffer.truncate(0); // More efficient way to clear
-            let to_copy = min(buf.remaining(), this.buffer.len());
-            buf.put_slice(&this.buffer[..to_copy]);
-            *this.pos += to_copy;
-            if *this.pos == this.buffer.len() {
-                this.buffer.clear();
-                *this.pos = 0;
-            }
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
-    }
-}
+
 
 impl<R> EtagResolvable for CompressReader<R>
 where
@@ -530,18 +446,7 @@ where
     }
 }
 
-impl<R> HashReaderDetector for CompressReader<R>
-where
-    R: HashReaderDetector,
-{
-    fn is_hash_reader(&self) -> bool {
-        self.inner.is_hash_reader()
-    }
 
-    fn as_hash_reader_mut(&mut self) -> Option<&mut dyn HashReaderMut> {
-        self.inner.as_hash_reader_mut()
-    }
-}
 
 pin_project! {
     /// A reader wrapper that decompresses data on the fly using DEFLATE algorithm.

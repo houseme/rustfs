@@ -16,7 +16,8 @@ use std::io::Cursor;
 use std::pin::Pin;
 use tokio::io::AsyncWrite;
 
-use crate::HttpWriter;
+// HttpWriter will be defined later - using placeholder for now
+pub struct HttpWriter;
 
 pub enum Writer {
     Cursor(Cursor<Vec<u8>>),

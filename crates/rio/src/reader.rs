@@ -17,7 +17,10 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::compress_index::TryGetIndex;
-use crate::{EtagResolvable, HashReaderDetector, Reader};
+use crate::{EtagResolvable, HashReaderDetector};
+
+/// Base trait for all reader types in the RustFS Rio framework
+pub trait Reader: AsyncRead + Unpin + Send + Sync {}
 
 pub struct WarpReader<R> {
     inner: R,
@@ -37,7 +40,11 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncRead for WarpReader<R> {
 
 impl<R: AsyncRead + Unpin + Send + Sync> HashReaderDetector for WarpReader<R> {}
 
-impl<R: AsyncRead + Unpin + Send + Sync> EtagResolvable for WarpReader<R> {}
+impl<R: AsyncRead + Unpin + Send + Sync> EtagResolvable for WarpReader<R> {
+    fn try_resolve_etag(&mut self) -> Option<String> {
+        None
+    }
+}
 
 impl<R: AsyncRead + Unpin + Send + Sync> TryGetIndex for WarpReader<R> {}
 

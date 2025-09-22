@@ -273,10 +273,6 @@ impl AsyncRead for EtagReader {
 }
 
 impl EtagResolvable for EtagReader {
-    fn is_etag_reader(&self) -> bool {
-        true
-    }
-    
     fn try_resolve_etag(&mut self) -> Option<String> {
         // EtagReader provides its own etag, not delegating to inner
         if let Some(checksum) = &self.checksum {
