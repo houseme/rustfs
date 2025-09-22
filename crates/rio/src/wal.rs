@@ -19,7 +19,7 @@
 //! write throughput for high-frequency logging operations.
 
 use crate::disk::{AsyncFile, DiskFile};
-use crate::io_engine::get_io_engine;
+
 use crate::runtime::{RuntimeError, RuntimeHandle};
 use bytes::{Bytes, BytesMut};
 use std::collections::VecDeque;

@@ -16,7 +16,7 @@ use crate::HashReaderDetector;
 use crate::HashReaderMut;
 use crate::compress_index::{Index, TryGetIndex};
 use crate::io_engine::get_io_engine;
-use crate::{EtagResolvable, Reader};
+use crate::EtagResolvable;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use pin_project_lite::pin_project;

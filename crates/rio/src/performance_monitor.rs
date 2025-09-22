@@ -729,7 +729,7 @@ mod tests {
     #[tokio::test]
     async fn test_optimization_recommendations() {
         let config = PerformanceMonitorConfig::default();
-        let monitor = AdvancedPerformanceMonitor::new(config);
+        let _monitor = AdvancedPerformanceMonitor::new(config);
 
         // Create performance data that should generate recommendations
         let mut poor_performance_stats = RealTimeStats::default();

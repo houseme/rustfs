@@ -20,7 +20,7 @@ use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
-use tracing::{Instrument, info_span, instrument};
+use tracing::{instrument, info_span};
 
 #[cfg(feature = "metrics")]
 use metrics::{counter, gauge, histogram};
@@ -191,7 +191,7 @@ impl AsyncRead for EtagReader {
         let orig_filled = buf.filled().len();
 
         // Create instrumented span for detailed tracing
-        let span = info_span!(
+        let _span = info_span!(
             "etag_reader_poll_read",
             original_filled = orig_filled,
             buffer_remaining = buf.remaining(),

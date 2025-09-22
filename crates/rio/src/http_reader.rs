@@ -16,9 +16,9 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt as _};
 use http::HeaderMap;
 use pin_project_lite::pin_project;
-use reqwest::{Client, Method, RequestBuilder};
-use std::error::Error as _;
-use std::io::{self, Error};
+use reqwest::{Client, Method};
+
+use std::io;
 
 use std::pin::Pin;
 use std::sync::LazyLock;
@@ -27,7 +27,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use tokio_util::io::StreamReader;
-use tracing::{Instrument, info_span, instrument};
+use tracing::instrument;
 
 use crate::io_engine::get_io_engine;
 use crate::{EtagResolvable, HashReaderDetector, HashReaderMut};
@@ -88,7 +88,31 @@ pin_project! {
     }
 }
 
+impl std::fmt::Debug for HttpReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpReader")
+            .field("url", &self.url)
+            .field("method", &self.method)
+            .field("headers", &self.headers)
+            .field("bytes_downloaded", &self.bytes_downloaded)
+            .field("request_start_time", &self.request_start_time)
+            .field("connection_reused", &self.connection_reused)
+            .finish()
+    }
+}
+
 impl HttpReader {
+    /// Create HttpReader with default configuration
+    #[instrument(skip(headers, body), fields(url = %url, method = ?method))]
+    pub async fn new(
+        url: String,
+        method: Method,
+        headers: HeaderMap,
+        body: Option<Vec<u8>>,
+    ) -> io::Result<Self> {
+        Self::with_capacity(url, method, headers, body, 256 * 1024).await
+    }
+
     /// Create HttpReader with enhanced buffering and io_uring optimization
     #[instrument(skip(headers, body), fields(url = %url, method = ?method, capacity))]
     pub async fn with_capacity(

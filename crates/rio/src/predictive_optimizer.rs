@@ -533,7 +533,7 @@ impl PredictiveOptimizer {
     }
 
     /// Update access patterns based on observed access
-    async fn update_access_patterns(&self, operation_type: &str, offset: u64, size: usize, timestamp: Instant) {
+    async fn update_access_patterns(&self, operation_type: &str, offset: u64, size: usize, _timestamp: Instant) {
         let mut patterns = self.access_patterns.write().await;
         let timestamp_duration = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
 
@@ -844,7 +844,7 @@ mod tests {
                 },
                 confidence: 0.9,
                 parameters: HashMap::new(),
-                last_update: Instant::now(),
+                last_update: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default(),
                 observation_count: 50,
             },
         );
@@ -874,7 +874,7 @@ mod tests {
             expected_improvement: 0.2,
             confidence: 0.8,
             priority: 5,
-            apply_at: Instant::now(),
+            apply_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default(),
         };
 
         let result = optimizer.apply_optimization(recommendation).await;

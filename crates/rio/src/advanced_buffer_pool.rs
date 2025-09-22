@@ -520,7 +520,7 @@ mod tests {
         sleep(Duration::from_millis(10)).await;
 
         // Allocate another buffer - should be a cache hit
-        let buffer2 = pool.get_optimized_buffer(1024).await.unwrap();
+        let _buffer2 = pool.get_optimized_buffer(1024).await.unwrap();
         let stats = pool.get_stats().await;
 
         // We should have some cache hits after buffer reuse

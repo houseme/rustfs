@@ -635,7 +635,7 @@ mod tests {
 
         // Verify we can get the compression index
         let index = compress_reader.try_get_index().unwrap();
-        assert!(!index.is_empty());
+        assert!(index.total_uncompressed > 0);
     }
 
     #[tokio::test]
