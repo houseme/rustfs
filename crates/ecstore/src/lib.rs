@@ -35,6 +35,7 @@ pub mod global;
 pub mod metrics_realtime;
 pub mod notification_sys;
 pub mod pools;
+pub mod quorum_manager;
 pub mod rebalance;
 pub mod rpc;
 pub mod set_disk;

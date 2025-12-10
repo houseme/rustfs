@@ -107,3 +107,66 @@ pub static HEALTH_CIRCUIT_BREAKERS_HALF_OPEN_COUNT_MD: LazyLock<MetricDescriptor
         subsystems::CLUSTER_HEALTH,
     )
 });
+
+pub static QUORUM_DISKS_ONLINE_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::QuorumDisksOnlineCount,
+        "Count of online disks in quorum",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static QUORUM_DISKS_OFFLINE_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::QuorumDisksOfflineCount,
+        "Count of offline disks in quorum",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static QUORUM_DISKS_CHECKING_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::QuorumDisksCheckingCount,
+        "Count of disks being checked in quorum",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static QUORUM_WRITE_OPS_TOTAL_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_counter_md(
+        MetricName::QuorumWriteOpsTotal,
+        "Total write operations attempted",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static QUORUM_WRITE_BLOCKED_TOTAL_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_counter_md(
+        MetricName::QuorumWriteBlockedTotal,
+        "Total write operations blocked due to insufficient quorum",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static QUORUM_DISKS_ELIMINATED_TOTAL_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_counter_md(
+        MetricName::QuorumDisksEliminatedTotal,
+        "Total disks eliminated from operations",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static QUORUM_WRITE_PAUSED_STATE_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::QuorumWritePausedState,
+        "Write operations paused state (1=paused, 0=active)",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});

@@ -207,6 +207,15 @@ pub enum MetricName {
     HealthCircuitBreakersOpenCount,
     HealthCircuitBreakersHalfOpenCount,
 
+    // EC Quorum-related metrics
+    QuorumDisksOnlineCount,
+    QuorumDisksOfflineCount,
+    QuorumDisksCheckingCount,
+    QuorumWriteOpsTotal,
+    QuorumWriteBlockedTotal,
+    QuorumDisksEliminatedTotal,
+    QuorumWritePausedState,
+
     // IAM-related metrics
     LastSyncDurationMillis,
     PluginAuthnServiceFailedRequestsMinute,
@@ -530,6 +539,15 @@ impl MetricName {
             Self::HealthConnectionsEvictedTotal => "connections_evicted_total".to_string(),
             Self::HealthCircuitBreakersOpenCount => "circuit_breakers_open_count".to_string(),
             Self::HealthCircuitBreakersHalfOpenCount => "circuit_breakers_half_open_count".to_string(),
+
+            // EC Quorum-related metrics
+            Self::QuorumDisksOnlineCount => "quorum_disks_online_count".to_string(),
+            Self::QuorumDisksOfflineCount => "quorum_disks_offline_count".to_string(),
+            Self::QuorumDisksCheckingCount => "quorum_disks_checking_count".to_string(),
+            Self::QuorumWriteOpsTotal => "quorum_write_ops_total".to_string(),
+            Self::QuorumWriteBlockedTotal => "quorum_write_blocked_total".to_string(),
+            Self::QuorumDisksEliminatedTotal => "quorum_disks_eliminated_total".to_string(),
+            Self::QuorumWritePausedState => "quorum_write_paused_state".to_string(),
 
             // IAM-related metrics
             Self::LastSyncDurationMillis => "last_sync_duration_millis".to_string(),
