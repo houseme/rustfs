@@ -28,6 +28,7 @@ use tracing::{debug, error, info};
 ///
 /// This service runs in the background and periodically checks the health
 /// of all nodes in the topology, updating their states as needed.
+#[derive(Debug)]
 pub struct HealthMonitor {
     /// Reference to the topology being monitored
     topology: Arc<SystemTopology>,

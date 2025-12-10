@@ -22,16 +22,16 @@
 //! - EC quorum management
 
 use anyhow::Result;
-use futures_util::TryFutureExt;
 use rustfs_quorum::QuorumVerifier;
 use rustfs_topology::{HealthMonitor, SystemTopology, TopologyConfig};
-use std::sync::{Arc, LazyLock, RwLock as StdRwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use tracing::{debug, info, warn};
 
 /// Global cluster manager instance
-static GLOBAL_CLUSTER_MANAGER: LazyLock<StdRwLock<Option<Arc<ClusterManager>>>> = LazyLock::new(|| StdRwLock::new(None));
+static GLOBAL_CLUSTER_MANAGER: LazyLock<RwLock<Option<Arc<ClusterManager>>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Cluster manager coordinating all cluster resilience components
+#[derive(Debug)]
 pub struct ClusterManager {
     /// Topology state management
     pub topology: Arc<SystemTopology>,
@@ -40,7 +40,7 @@ pub struct ClusterManager {
     pub quorum_verifier: Arc<QuorumVerifier>,
 
     /// Health monitor service handle
-    health_monitor_handle: Option<tokio::task::JoinHandle<()>>,
+    health_monitor: Option<HealthMonitor>,
 
     /// Cluster ID
     cluster_id: String,
@@ -78,18 +78,15 @@ impl ClusterManager {
 
         // Create and start health monitor
         let topology = Arc::new(topology);
-        let health_monitor = HealthMonitor::new(topology.clone());
-        let mut health_monitor_clone = Arc::new(health_monitor);
-        let health_monitor_handle = Some(tokio::spawn(async move {
-            health_monitor_clone.start();
-        }));
+        let mut health_monitor = HealthMonitor::new(topology.clone());
+        health_monitor.start();
 
         debug!("Health monitor started");
 
         let manager = Arc::new(Self {
             topology,
             quorum_verifier: quorum_verifier.into(),
-            health_monitor_handle,
+            health_monitor: Some(health_monitor),
             cluster_id: cluster_id.clone(),
         });
 
@@ -162,8 +159,8 @@ impl ClusterManager {
         info!("Shutting down Cluster Manager");
 
         // Stop health monitor
-        if let Some(handle) = self.health_monitor_handle.take() {
-            handle.abort();
+        if let Some(mut handle) = self.health_monitor.take() {
+            handle.stop();
             debug!("Health monitor stopped");
         }
 
@@ -174,8 +171,8 @@ impl ClusterManager {
 impl Drop for ClusterManager {
     fn drop(&mut self) {
         // Ensure health monitor is stopped
-        if let Some(handle) = self.health_monitor_handle.take() {
-            handle.abort();
+        if let Some(mut handle) = self.health_monitor.take() {
+            handle.stop();
         }
     }
 }
@@ -207,9 +204,9 @@ pub async fn initialize_cluster_management(
             format!("node-{}", i + 1)
         };
 
-        manager.register_node(&node_id, endpoint).await.unwrap_or_else(|e| {
-            warn!("Failed to register node {}: {}", endpoint, e);
-        });
+        if !manager.register_node(&node_id, endpoint).await {
+            warn!("Failed to register node {}", endpoint);
+        }
     }
 
     Ok(manager)
@@ -293,7 +290,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -305,7 +302,7 @@ mod tests {
         assert_eq!(stats.total_nodes, 0);
         assert_eq!(stats.healthy_nodes, 0);
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test comprehensive node registration and discovery
@@ -315,7 +312,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -330,7 +327,7 @@ mod tests {
         // New nodes start as Unknown, not Healthy
         assert_eq!(stats.healthy_nodes, 0);
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test node health tracking and state transitions
@@ -340,7 +337,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -379,7 +376,7 @@ mod tests {
         // After 5 failures, should be degraded or offline
         assert_ne!(status.health, NodeHealth::Healthy);
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test write quorum verification
@@ -389,7 +386,7 @@ mod tests {
         let total_nodes = 4; // Write quorum = 3 (N/2 + 1)
         let config = TopologyConfig::default();
 
-        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -427,7 +424,7 @@ mod tests {
         let can_write = manager.check_write_quorum().await.expect("Failed to check write quorum");
         assert!(!can_write, "Write quorum should NOT be satisfied with only 2/4 nodes");
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test read quorum verification
@@ -437,7 +434,7 @@ mod tests {
         let total_nodes = 4; // Read quorum = 2 (N/2)
         let config = TopologyConfig::default();
 
-        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -475,7 +472,7 @@ mod tests {
         let can_read = manager.check_read_quorum().await.expect("Failed to check read quorum");
         assert!(!can_read, "Read quorum should NOT be satisfied with only 1/4 nodes");
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test node failure detection and recovery
@@ -488,7 +485,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), Some(1))
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), Some(1))
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -538,7 +535,7 @@ mod tests {
         let stats = manager.get_cluster_stats().await;
         assert_eq!(stats.healthy_nodes, 3, "Recovered node should be marked healthy");
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test concurrent node operations
@@ -548,11 +545,9 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let mut manager = Arc::new(
-            ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
-                .await
-                .expect("Failed to initialize cluster manager"),
-        );
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+            .await
+            .expect("Failed to initialize cluster manager");
 
         // Register nodes
         for i in 1..=4 {
@@ -583,7 +578,7 @@ mod tests {
         let stats = manager.get_cluster_stats().await;
         assert_eq!(stats.total_nodes, 4);
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test cluster stats calculation
@@ -593,7 +588,7 @@ mod tests {
         let total_nodes = 5;
         let config = TopologyConfig::default();
 
-        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -639,6 +634,6 @@ mod tests {
         assert!(stats.has_write_quorum()); // 3 >= (5/2 + 1) = 3
         assert!(stats.has_read_quorum()); // 3 >= (5/2) = 2
 
-        manager.shutdown().await;
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 }

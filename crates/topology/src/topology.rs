@@ -25,6 +25,7 @@ use tracing::{debug, info, warn};
 ///
 /// Maintains centralized view of all nodes in the cluster with their health
 /// states, metrics, and metadata. Provides fast lock-free reads for hot paths.
+#[derive(Debug, Clone)]
 pub struct SystemTopology {
     /// Cluster identifier
     cluster_id: String,

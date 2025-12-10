@@ -18,6 +18,7 @@ use crate::error::QuorumError;
 use anyhow::Result;
 
 /// Quorum verifier for cluster operations
+#[derive(Debug, Clone)]
 pub struct QuorumVerifier {
     #[allow(dead_code)]
     total_nodes: usize,
