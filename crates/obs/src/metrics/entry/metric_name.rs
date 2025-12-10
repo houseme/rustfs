@@ -199,6 +199,13 @@ pub enum MetricName {
     HealthDrivesOfflineCount,
     HealthDrivesOnlineCount,
     HealthDrivesCount,
+    HealthConnectionsCachedCount,
+    HealthConnectionsHealthyCount,
+    HealthConnectionsDegradedCount,
+    HealthConnectionsDeadCount,
+    HealthConnectionsEvictedTotal,
+    HealthCircuitBreakersOpenCount,
+    HealthCircuitBreakersHalfOpenCount,
 
     // IAM-related metrics
     LastSyncDurationMillis,
@@ -516,6 +523,13 @@ impl MetricName {
             Self::HealthDrivesOfflineCount => "drives_offline_count".to_string(),
             Self::HealthDrivesOnlineCount => "drives_online_count".to_string(),
             Self::HealthDrivesCount => "drives_count".to_string(),
+            Self::HealthConnectionsCachedCount => "connections_cached_count".to_string(),
+            Self::HealthConnectionsHealthyCount => "connections_healthy_count".to_string(),
+            Self::HealthConnectionsDegradedCount => "connections_degraded_count".to_string(),
+            Self::HealthConnectionsDeadCount => "connections_dead_count".to_string(),
+            Self::HealthConnectionsEvictedTotal => "connections_evicted_total".to_string(),
+            Self::HealthCircuitBreakersOpenCount => "circuit_breakers_open_count".to_string(),
+            Self::HealthCircuitBreakersHalfOpenCount => "circuit_breakers_half_open_count".to_string(),
 
             // IAM-related metrics
             Self::LastSyncDurationMillis => "last_sync_duration_millis".to_string(),

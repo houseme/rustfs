@@ -44,3 +44,66 @@ pub static HEALTH_DRIVES_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(||
         subsystems::CLUSTER_HEALTH,
     )
 });
+
+pub static HEALTH_CONNECTIONS_CACHED_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::HealthConnectionsCachedCount,
+        "Count of cached gRPC connections",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static HEALTH_CONNECTIONS_HEALTHY_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::HealthConnectionsHealthyCount,
+        "Count of healthy cached connections",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static HEALTH_CONNECTIONS_DEGRADED_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::HealthConnectionsDegradedCount,
+        "Count of degraded cached connections",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static HEALTH_CONNECTIONS_DEAD_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::HealthConnectionsDeadCount,
+        "Count of dead cached connections",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static HEALTH_CONNECTIONS_EVICTED_TOTAL_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::HealthConnectionsEvictedTotal,
+        "Total count of evicted connections",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static HEALTH_CIRCUIT_BREAKERS_OPEN_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::HealthCircuitBreakersOpenCount,
+        "Count of open circuit breakers",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
+
+pub static HEALTH_CIRCUIT_BREAKERS_HALF_OPEN_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
+    new_gauge_md(
+        MetricName::HealthCircuitBreakersHalfOpenCount,
+        "Count of half-open circuit breakers",
+        &[],
+        subsystems::CLUSTER_HEALTH,
+    )
+});
