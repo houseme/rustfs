@@ -15,9 +15,8 @@
 //! Tests for connection health tracking and management
 
 use rustfs_common::globals::{
-    evict_unhealthy_connections, get_connection_health, get_connection_health_stats,
+    ConnectionHealth, HealthState, evict_unhealthy_connections, get_connection_health, get_connection_health_stats,
     record_connection_failure, record_connection_success, start_connection_health_checker,
-    ConnectionHealth, HealthState,
 };
 use std::time::Duration;
 
@@ -90,14 +89,14 @@ async fn test_get_connection_health() {
 #[tokio::test]
 async fn test_record_connection_success() {
     let addr = "test-peer-6";
-    
+
     // Record some failures first
     record_connection_failure(addr).await;
     record_connection_failure(addr).await;
-    
+
     let health = get_connection_health(addr).await;
     assert_eq!(health.get_state(), HealthState::Degraded);
-    
+
     // Record success should reset state
     record_connection_success(addr).await;
     assert_eq!(health.get_state(), HealthState::Healthy);

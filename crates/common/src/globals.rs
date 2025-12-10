@@ -16,7 +16,7 @@
 
 use crate::circuit_breaker::CircuitBreakerRegistry;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
@@ -85,7 +85,7 @@ impl ConnectionHealth {
     /// Record a failed operation
     pub async fn record_failure(&self) {
         let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
-        
+
         // Mark as degraded after 1 failure, dead after 3 failures
         if failures >= 3 {
             self.health_state.store(HealthState::Dead as u8, Ordering::Relaxed);
@@ -102,7 +102,7 @@ impl ConnectionHealth {
     /// Check if connection should be evicted based on health criteria
     pub async fn should_evict(&self, max_idle_secs: u64, max_failures: u32, health_check_interval_secs: u64) -> bool {
         let state = HealthState::from(self.health_state.load(Ordering::Relaxed));
-        
+
         // Always evict dead connections
         if state == HealthState::Dead {
             return true;
@@ -187,7 +187,7 @@ pub async fn should_attempt_peer(addr: &str) -> bool {
 /// Resets failure count and closes circuit breaker if it was open.
 pub async fn record_peer_success(addr: &str) {
     GLOBAL_CIRCUIT_BREAKERS.record_success(addr).await;
-    
+
     // Always update connection health (creates tracker if needed)
     let health = get_connection_health(addr).await;
     health.record_success().await;
@@ -197,7 +197,7 @@ pub async fn record_peer_success(addr: &str) {
 /// Increments failure count and may open circuit breaker after threshold.
 pub async fn record_peer_failure(addr: &str) {
     GLOBAL_CIRCUIT_BREAKERS.record_failure(addr).await;
-    
+
     // Always update connection health (creates tracker if needed)
     let health = get_connection_health(addr).await;
     health.record_failure().await;
@@ -254,7 +254,10 @@ pub async fn evict_unhealthy_connections() -> usize {
     let mut addrs_to_evict = Vec::new();
 
     for (addr, health) in health_map.iter() {
-        if health.should_evict(MAX_IDLE_SECS, MAX_FAILURES, HEALTH_CHECK_INTERVAL_SECS).await {
+        if health
+            .should_evict(MAX_IDLE_SECS, MAX_FAILURES, HEALTH_CHECK_INTERVAL_SECS)
+            .await
+        {
             addrs_to_evict.push(addr.clone());
         }
     }
@@ -292,10 +295,7 @@ pub async fn evict_unhealthy_connections() -> usize {
 /// This is critical for cluster power-off recovery scenarios where cached
 /// connections to dead nodes need to be proactively removed.
 pub fn start_connection_health_checker(interval_secs: u64) -> tokio::task::JoinHandle<()> {
-    info!(
-        "Starting connection health checker with interval: {}s",
-        interval_secs
-    );
+    info!("Starting connection health checker with interval: {}s", interval_secs);
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
@@ -307,10 +307,7 @@ pub fn start_connection_health_checker(interval_secs: u64) -> tokio::task::JoinH
 
             let evicted = evict_unhealthy_connections().await;
             if evicted > 0 {
-                info!(
-                    "Connection health checker evicted {} unhealthy connections",
-                    evicted
-                );
+                info!("Connection health checker evicted {} unhealthy connections", evicted);
             } else {
                 debug!("Connection health checker: all connections healthy");
             }
@@ -333,10 +330,7 @@ pub async fn get_connection_health_stats() -> HashMap<String, (HealthState, u32,
         let state = health.get_state();
         let failures = health.consecutive_failures.load(Ordering::Relaxed);
         let last_use = *health.last_successful_use.read().await;
-        let idle_secs = SystemTime::now()
-            .duration_since(last_use)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let idle_secs = SystemTime::now().duration_since(last_use).map(|d| d.as_secs()).unwrap_or(0);
 
         stats.insert(addr.clone(), (state, failures, idle_secs));
     }
