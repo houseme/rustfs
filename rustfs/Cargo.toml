@@ -101,6 +101,7 @@ chrono = { workspace = true }
 time = { workspace = true, features = ["parsing", "formatting", "serde"] }
 
 # Utilities and Tools
+anyhow = { workspace = true }
 astral-tokio-tar = { workspace = true }
 atoi = { workspace = true }
 atomic_enum = { workspace = true }

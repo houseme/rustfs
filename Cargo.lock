@@ -6981,6 +6981,7 @@ dependencies = [
 name = "rustfs"
 version = "0.0.5"
 dependencies = [
+ "anyhow",
  "astral-tokio-tar",
  "async-trait",
  "atoi",

@@ -145,7 +145,7 @@ impl ClusterManager {
     }
 
     /// Get cluster ID
-    pub fn cluster_id(&self) -> &str {
+    pub fn get_cluster_id(&self) -> &str {
         &self.cluster_id
     }
 
@@ -222,7 +222,7 @@ mod tests {
             .await
             .expect("Failed to initialize manager");
 
-        assert_eq!(manager.cluster_id(), "test-cluster");
+        assert_eq!(manager.get_cluster_id(), "test-cluster");
 
         // Test global instance retrieval
         let global_manager = ClusterManager::get();
