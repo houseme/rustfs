@@ -77,8 +77,9 @@ impl ClusterManager {
         debug!("Quorum verifier initialized for {} nodes", initial_node_count);
 
         // Create and start health monitor
-        let health_monitor = HealthMonitor::new(Arc::new(topology));
-        let health_monitor_clone = Arc::new(health_monitor);
+        let topology = Arc::new(topology);
+        let health_monitor = HealthMonitor::new(topology.clone());
+        let mut health_monitor_clone = Arc::new(health_monitor);
         let health_monitor_handle = Some(tokio::spawn(async move {
             health_monitor_clone.start();
         }));
@@ -86,7 +87,7 @@ impl ClusterManager {
         debug!("Health monitor started");
 
         let manager = Arc::new(Self {
-            topology: topology.into(),
+            topology,
             quorum_verifier: quorum_verifier.into(),
             health_monitor_handle,
             cluster_id: cluster_id.clone(),
