@@ -27,6 +27,7 @@ mod update;
 mod version;
 
 // Ensure the correct path for parse_license is imported
+use crate::cluster_manager::ClusterManager;
 use crate::init::{add_bucket_notification_configuration, init_buffer_profile_system, init_kms_system, init_update_check};
 use crate::server::{
     SHUTDOWN_TIMEOUT, ServiceState, ServiceStateManager, ShutdownSignal, init_event_notifier, shutdown_event_notifier,
@@ -40,8 +41,6 @@ use rustfs_ahm::{
     scanner::data_scanner::ScannerConfig, shutdown_ahm_services,
 };
 use rustfs_common::globals::{set_global_addr, start_connection_health_checker};
-use crate::cluster_manager::ClusterManager;
-use rustfs_topology::TopologyConfig;
 use rustfs_ecstore::bucket::metadata_sys::init_bucket_metadata_sys;
 use rustfs_ecstore::bucket::replication::{GLOBAL_REPLICATION_POOL, init_background_replication};
 use rustfs_ecstore::config as ecconfig;
@@ -59,6 +58,7 @@ use rustfs_ecstore::{
 };
 use rustfs_iam::init_iam_sys;
 use rustfs_obs::{init_obs, set_global_guard};
+use rustfs_topology::TopologyConfig;
 use rustfs_utils::net::parse_and_resolve_address;
 use std::io::{Error, Result};
 use std::sync::Arc;
@@ -301,7 +301,7 @@ async fn run(opt: config::Opt) -> Result<()> {
     let health_check_interval = std::env::var("RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL")
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
-    
+
     let cluster_manager = ClusterManager::initialize(
         "rustfs-cluster".to_string(),
         endpoint_pools.len(),
@@ -321,7 +321,7 @@ async fn run(opt: config::Opt) -> Result<()> {
             .inspect_err(|e| warn!("Failed to register node {}: {}", node_id, e))
             .ok();
     }
-    
+
     info!(
         "Cluster manager initialized with {} nodes, health check interval: {}s",
         endpoint_pools.len(),

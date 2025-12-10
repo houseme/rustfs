@@ -242,7 +242,7 @@ mod tests {
 
         let stats = manager.get_cluster_stats().await;
         assert!(stats.total_nodes >= 1);
-        
+
         // Shutdown to clean up
         Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
@@ -275,7 +275,7 @@ mod tests {
 
         assert!(write_quorum, "Write quorum should be available with 4 healthy nodes");
         assert!(read_quorum, "Read quorum should be available with 4 healthy nodes");
-        
+
         // Shutdown to clean up
         Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
@@ -296,7 +296,7 @@ mod tests {
 
         let stats = manager.get_cluster_stats().await;
         assert!(stats.healthy_nodes >= 1);
-        
+
         // Shutdown to clean up
         Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
