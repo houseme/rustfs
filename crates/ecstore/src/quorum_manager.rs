@@ -437,8 +437,7 @@ mod tests {
         manager.disks[1].record_failure().await;
         manager.disks[1].record_failure().await;
 
-        // Should still pass (4 online >= 5 required... wait, that's not enough)
-        // Actually with D=4, P=2, we need D+1=5 disks, and we have only 4 online
+        // With D=4, P=2, we need D+1=5 disks, and we have only 4 online
         let result = manager.verify_write_quorum().await;
         assert!(result.is_err());
     }
