@@ -113,9 +113,9 @@ impl ClusterManager {
     /// # Arguments
     /// * `node_id` - Unique identifier for the node
     /// * `endpoint` - Network endpoint (e.g., "http://node1:9000")
-    pub async fn register_node(&self, node_id: String, endpoint: String) -> Result<()> {
+    pub async fn register_node(&self, node_id: &str, endpoint: &str) -> Result<()> {
         debug!("Registering node: {} at {}", node_id, endpoint);
-        self.topology.register_node(node_id, endpoint).await
+        self.topology.register_node(node_id.to_string(), endpoint.to_string()).await
     }
 
     /// Update node health based on operation result
