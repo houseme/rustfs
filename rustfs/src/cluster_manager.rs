@@ -22,16 +22,14 @@
 //! - EC quorum management
 
 use anyhow::Result;
-use once_cell::sync::Lazy;
 use rustfs_quorum::QuorumVerifier;
 use rustfs_topology::{HealthMonitor, SystemTopology, TopologyConfig};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, LazyLock, RwLock as StdRwLock};
 use tracing::{debug, info, warn};
 
 /// Global cluster manager instance
-static GLOBAL_CLUSTER_MANAGER: Lazy<RwLock<Option<Arc<ClusterManager>>>> =
-    Lazy::new(|| RwLock::new(None));
+static GLOBAL_CLUSTER_MANAGER: LazyLock<StdRwLock<Option<Arc<ClusterManager>>>> =
+    LazyLock::new(|| StdRwLock::new(None));
 
 /// Cluster manager coordinating all cluster resilience components
 pub struct ClusterManager {
@@ -53,14 +51,22 @@ impl ClusterManager {
     ///
     /// This should be called during server startup to initialize the global
     /// topology and quorum management systems.
+    ///
+    /// # Arguments
+    /// * `cluster_id` - Unique cluster identifier
+    /// * `initial_node_count` - Expected number of nodes in the cluster
+    /// * `config` - Optional topology configuration (uses defaults if None)
+    /// * `health_check_interval_secs` - Health monitor check interval in seconds (default: 10)
     pub async fn initialize(
         cluster_id: String,
         initial_node_count: usize,
         config: Option<TopologyConfig>,
+        health_check_interval_secs: Option<u64>,
     ) -> Result<Arc<Self>> {
         info!("Initializing Cluster Manager for cluster: {}", cluster_id);
         
         let config = config.unwrap_or_default();
+        let interval = health_check_interval_secs.unwrap_or(10);
         
         // Create topology manager
         let topology = SystemTopology::new(&cluster_id, config).await?;
@@ -71,7 +77,7 @@ impl ClusterManager {
         debug!("Quorum verifier initialized for {} nodes", initial_node_count);
         
         // Create and start health monitor
-        let health_monitor = HealthMonitor::new(Arc::clone(&topology), 10); // 10s interval
+        let health_monitor = HealthMonitor::new(Arc::clone(&topology), interval);
         
         let health_monitor_handle = Some(tokio::spawn(async move {
             if let Err(e) = health_monitor.start().await {
@@ -89,7 +95,8 @@ impl ClusterManager {
         });
         
         // Store in global instance
-        let mut global = GLOBAL_CLUSTER_MANAGER.write().await;
+        let mut global = GLOBAL_CLUSTER_MANAGER.write()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire global lock: {}", e))?;
         *global = Some(Arc::clone(&manager));
         
         info!("Cluster Manager initialized successfully");
@@ -97,8 +104,8 @@ impl ClusterManager {
     }
     
     /// Get the global cluster manager instance
-    pub async fn get() -> Option<Arc<Self>> {
-        GLOBAL_CLUSTER_MANAGER.read().await.clone()
+    pub fn get() -> Option<Arc<Self>> {
+        GLOBAL_CLUSTER_MANAGER.read().ok()?.clone()
     }
     
     /// Register a node in the topology
@@ -183,17 +190,37 @@ impl Drop for ClusterManager {
 
 /// Initialize cluster manager with automatic node discovery
 ///
-/// This is a convenience function for integration with existing RustFS initialization
+/// This is a convenience function for integration with existing RustFS initialization.
+///
+/// # Arguments
+/// * `cluster_id` - Unique cluster identifier
+/// * `endpoints` - List of node endpoints in the cluster
+/// * `node_id_fn` - Optional function to generate node IDs from endpoints
+/// * `health_check_interval_secs` - Optional health check interval (default: 10s)
 pub async fn initialize_cluster_management(
     cluster_id: String,
     endpoints: &[String],
+    node_id_fn: Option<&dyn Fn(&str, usize) -> String>,
+    health_check_interval_secs: Option<u64>,
 ) -> Result<Arc<ClusterManager>> {
     let node_count = endpoints.len().max(1);
-    let manager = ClusterManager::initialize(cluster_id.clone(), node_count, None).await?;
+    let manager = ClusterManager::initialize(
+        cluster_id.clone(),
+        node_count,
+        None,
+        health_check_interval_secs,
+    )
+    .await?;
     
     // Register all known endpoints
     for (i, endpoint) in endpoints.iter().enumerate() {
-        let node_id = format!("node-{}", i + 1);
+        let node_id = if let Some(fn_gen) = node_id_fn {
+            fn_gen(endpoint, i)
+        } else {
+            // Default: extract from endpoint or use index
+            format!("node-{}", i + 1)
+        };
+        
         manager
             .register_node(node_id, endpoint.clone())
             .await
@@ -215,6 +242,7 @@ mod tests {
             "test-cluster".to_string(),
             4,
             None,
+            None,
         )
         .await
         .expect("Failed to initialize manager");
@@ -222,7 +250,7 @@ mod tests {
         assert_eq!(manager.cluster_id(), "test-cluster");
         
         // Test global instance retrieval
-        let global_manager = ClusterManager::get().await;
+        let global_manager = ClusterManager::get();
         assert!(global_manager.is_some());
     }
     
@@ -231,6 +259,7 @@ mod tests {
         let manager = ClusterManager::initialize(
             "test-cluster-2".to_string(),
             4,
+            None,
             None,
         )
         .await
@@ -250,6 +279,7 @@ mod tests {
         let manager = ClusterManager::initialize(
             "test-cluster-3".to_string(),
             4,
+            None,
             None,
         )
         .await
@@ -279,6 +309,7 @@ mod tests {
         let manager = ClusterManager::initialize(
             "test-cluster-4".to_string(),
             2,
+            None,
             None,
         )
         .await
