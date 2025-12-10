@@ -167,6 +167,21 @@ impl SystemTopology {
         }
     }
 
+    /// Record a node operation with its result and optional latency
+    ///
+    /// # Arguments
+    /// * `node_id` - Node identifier
+    /// * `success` - Whether the operation was successful
+    /// * `latency_ms` - Optional latency measurement in milliseconds
+    pub async fn record_node_operation(&self, node_id: &str, success: bool, latency_ms: Option<u64>) -> Result<()> {
+        if success {
+            // Use latency if provided, otherwise use 0 as a placeholder
+            self.record_node_success(node_id, latency_ms.unwrap_or(0)).await
+        } else {
+            self.record_node_failure(node_id).await
+        }
+    }
+
     /// Record a failed operation to a node
     pub async fn record_node_failure(&self, node_id: &str) -> Result<()> {
         if let Some(node_ref) = self.nodes.get(node_id) {
