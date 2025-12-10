@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Node health state enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeHealth {
     /// Node is fully operational and responding normally
@@ -41,6 +41,7 @@ pub enum NodeHealth {
     Suspended,
 
     /// Node state is unknown (initial state before first health check)
+    #[default]
     Unknown,
 }
 
@@ -67,12 +68,6 @@ impl NodeHealth {
             NodeHealth::Suspended => 0,
             NodeHealth::Unknown => 50,
         }
-    }
-}
-
-impl Default for NodeHealth {
-    fn default() -> Self {
-        NodeHealth::Unknown
     }
 }
 
@@ -149,10 +144,10 @@ impl NodeMetrics {
 
     /// Check if node is degraded based on metrics
     pub fn is_degraded(&self, degraded_latency_threshold_ms: u64, error_rate_threshold: f64) -> bool {
-        if let Some(latency) = self.latency_ms {
-            if latency > degraded_latency_threshold_ms {
-                return true;
-            }
+        if let Some(latency) = self.latency_ms
+            && latency > degraded_latency_threshold_ms
+        {
+            return true;
         }
 
         self.error_rate > error_rate_threshold
