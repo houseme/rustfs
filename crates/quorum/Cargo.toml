@@ -1,0 +1,55 @@
+# Copyright 2024 RustFS Team
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[package]
+name = "rustfs-quorum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Quorum and consensus mechanism for RustFS cluster operations"
+keywords = ["quorum", "consensus", "distributed", "cluster"]
+categories.workspace = true
+
+[dependencies]
+# RustFS Internal
+rustfs-common = { workspace = true }
+rustfs-topology = { path = "../topology", version = "0.0.5" }
+rustfs-obs = { workspace = true }
+
+# Async Runtime
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Data Structures  
+dashmap = "6.1.0"
+parking_lot = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error Handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging and Metrics
+tracing = { workspace = true }
+metrics = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+serial_test = { workspace = true }

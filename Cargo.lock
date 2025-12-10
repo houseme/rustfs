@@ -7031,10 +7031,12 @@ dependencies = [
  "rustfs-obs",
  "rustfs-policy",
  "rustfs-protos",
+ "rustfs-quorum",
  "rustfs-rio",
  "rustfs-s3select-api",
  "rustfs-s3select-query",
  "rustfs-targets",
+ "rustfs-topology",
  "rustfs-utils",
  "rustfs-zip",
  "rustls 0.23.35",
@@ -7150,6 +7152,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "path-clean",
+ "reqwest",
  "rmp-serde",
  "rustfs-filemeta",
  "rustfs-madmin",
@@ -7219,6 +7222,7 @@ dependencies = [
  "hyper-util",
  "lazy_static",
  "md-5 0.11.0-rc.3",
+ "metrics",
  "moka",
  "nix 0.30.1",
  "num_cpus",
@@ -7462,6 +7466,7 @@ dependencies = [
  "rand 0.10.0-rc.5",
  "regex",
  "reqwest",
+ "rustfs-common",
  "rustfs-config",
  "rustfs-crypto",
  "serde",
@@ -7485,6 +7490,28 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "tracing",
+]
+
+[[package]]
+name = "rustfs-quorum"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dashmap",
+ "futures",
+ "metrics",
+ "parking_lot",
+ "rustfs-common",
+ "rustfs-obs",
+ "rustfs-topology",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
  "tracing",
 ]
 
@@ -7591,6 +7618,31 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "rustfs-topology"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "async-trait",
+ "chrono",
+ "dashmap",
+ "futures",
+ "metrics",
+ "parking_lot",
+ "rustfs-common",
+ "rustfs-obs",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

@@ -54,7 +54,9 @@ rustfs-notify = { workspace = true }
 rustfs-obs = { workspace = true }
 rustfs-policy = { workspace = true }
 rustfs-protos = { workspace = true }
+rustfs-quorum = { path = "../crates/quorum" }
 rustfs-rio.workspace = true
+rustfs-topology = { path = "../crates/topology" }
 rustfs-s3select-api = { workspace = true }
 rustfs-s3select-query = { workspace = true }
 rustfs-targets = { workspace = true }

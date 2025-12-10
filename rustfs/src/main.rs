@@ -14,11 +14,12 @@
 
 mod admin;
 mod auth;
+mod cluster_manager;
 mod config;
 mod error;
 // mod grpc;
 mod init;
-pub mod license;
+mod license;
 mod profiling;
 mod server;
 mod storage;
@@ -38,7 +39,7 @@ use rustfs_ahm::{
     Scanner, create_ahm_services_cancel_token, heal::storage::ECStoreHealStorage, init_heal_manager,
     scanner::data_scanner::ScannerConfig, shutdown_ahm_services,
 };
-use rustfs_common::globals::set_global_addr;
+use rustfs_common::globals::{set_global_addr, start_connection_health_checker};
 use rustfs_ecstore::bucket::metadata_sys::init_bucket_metadata_sys;
 use rustfs_ecstore::bucket::replication::{GLOBAL_REPLICATION_POOL, init_background_replication};
 use rustfs_ecstore::config as ecconfig;
@@ -284,6 +285,11 @@ async fn run(opt: config::Opt) -> Result<()> {
         error!("new_global_notification_sys failed {:?}", &err);
         Error::other(err)
     })?;
+
+    // Start connection health checker for cluster resilience
+    // Checks every 10 seconds and evicts unhealthy connections
+    info!("Starting connection health checker for cluster power-off recovery");
+    let _health_checker_handle = start_connection_health_checker(10);
 
     // Create a cancellation token for AHM services
     let _ = create_ahm_services_cancel_token();
