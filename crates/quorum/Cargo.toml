@@ -24,32 +24,13 @@ keywords = ["quorum", "consensus", "distributed", "cluster"]
 categories.workspace = true
 
 [dependencies]
-# RustFS Internal
-rustfs-common = { workspace = true }
-rustfs-topology = { path = "../topology", version = "0.0.5" }
-rustfs-obs = { workspace = true }
 
 # Async Runtime
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
-async-trait = { workspace = true }
-futures = { workspace = true }
-
-# Data Structures  
-dashmap = "6.1.0"
-parking_lot = { workspace = true }
-
-# Serialization
-serde = { workspace = true }
-serde_json = { workspace = true }
 
 # Error Handling
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
-# Logging and Metrics
-tracing = { workspace = true }
-metrics = { workspace = true }
-
 [dev-dependencies]
 tokio-test = { workspace = true }
-serial_test = { workspace = true }

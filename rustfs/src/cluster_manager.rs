@@ -221,7 +221,7 @@ mod tests {
     use super::*;
     use rustfs_topology::{NodeHealth, TopologyConfig};
     use std::sync::Arc;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     #[tokio::test]
     async fn test_cluster_manager_initialization() {
@@ -294,7 +294,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -316,7 +316,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -341,7 +341,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -390,7 +390,7 @@ mod tests {
         let total_nodes = 4; // Write quorum = 3 (N/2 + 1)
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -438,7 +438,7 @@ mod tests {
         let total_nodes = 4; // Read quorum = 2 (N/2)
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -489,7 +489,7 @@ mod tests {
             ..Default::default()
         };
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), Some(1))
+        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), Some(1))
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -549,7 +549,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let manager = Arc::new(
+        let mut manager = Arc::new(
             ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
                 .await
                 .expect("Failed to initialize cluster manager"),
@@ -594,7 +594,7 @@ mod tests {
         let total_nodes = 5;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
+        let mut manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 

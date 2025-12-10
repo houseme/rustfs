@@ -24,37 +24,24 @@ keywords = ["topology", "cluster", "state-management", "health-monitoring"]
 categories.workspace = true
 
 [dependencies]
-# RustFS Internal
-rustfs-common = { workspace = true }
-rustfs-obs = { workspace = true }
 
 # Async Runtime
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
-tokio-util = { workspace = true }
-async-trait = { workspace = true }
-futures = { workspace = true }
 
 # Data Structures
 dashmap = "6.1.0"
-parking_lot = { workspace = true }
-arc-swap = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 # Error Handling
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 
 # Logging and Metrics
 tracing = { workspace = true }
-metrics = { workspace = true }
 
 # Time
 chrono = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
-tempfile = { workspace = true }
-serial_test = { workspace = true }
