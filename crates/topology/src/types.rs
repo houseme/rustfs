@@ -342,7 +342,6 @@ impl ClusterStats {
 
 /// Helper module for Instant serialization
 mod instant_serialization {
-    use super::*;
     use serde::Serializer;
     use std::time::Instant;
 
