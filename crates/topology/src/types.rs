@@ -313,25 +313,28 @@ pub struct ClusterStats {
 }
 
 impl ClusterStats {
+    /// Get the count of operational nodes (healthy + degraded)
+    #[inline]
+    fn operational_nodes(&self) -> usize {
+        self.healthy_nodes + self.degraded_nodes
+    }
+
     /// Calculate quorum availability (fraction of operational nodes)
     pub fn quorum_availability(&self) -> f64 {
         if self.total_nodes == 0 {
             return 0.0;
         }
-        let operational = self.healthy_nodes + self.degraded_nodes;
-        operational as f64 / self.total_nodes as f64
+        self.operational_nodes() as f64 / self.total_nodes as f64
     }
 
     /// Check if cluster has write quorum (> N/2 nodes operational)
     pub fn has_write_quorum(&self) -> bool {
-        let operational = self.healthy_nodes + self.degraded_nodes;
-        operational > self.total_nodes / 2
+        self.operational_nodes() > self.total_nodes / 2
     }
 
     /// Check if cluster has read quorum (>= N/2 nodes operational)
     pub fn has_read_quorum(&self) -> bool {
-        let operational = self.healthy_nodes + self.degraded_nodes;
-        operational >= self.total_nodes / 2
+        self.operational_nodes() >= self.total_nodes / 2
     }
 }
 

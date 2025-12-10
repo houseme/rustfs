@@ -113,9 +113,9 @@ impl ClusterManager {
     /// # Arguments
     /// * `node_id` - Unique identifier for the node
     /// * `endpoint` - Network endpoint (e.g., "http://node1:9000")
-    pub async fn register_node(&self, node_id: String, endpoint: String) -> Result<()> {
+    pub async fn register_node(&self, node_id: &str, endpoint: &str) -> Result<()> {
         debug!("Registering node: {} at {}", node_id, endpoint);
-        self.topology.register_node(node_id, endpoint).await
+        self.topology.register_node(node_id.to_string(), endpoint.to_string()).await
     }
 
     /// Update node health based on operation result
@@ -155,6 +155,9 @@ impl ClusterManager {
     }
 
     /// Shutdown the cluster manager
+    ///
+    /// Note: This method requires exclusive ownership. Consider using Arc::try_unwrap
+    /// or other patterns to get mutable access from the shared Arc instance.
     pub async fn shutdown(&mut self) {
         info!("Shutting down Cluster Manager");
 
@@ -204,12 +207,9 @@ pub async fn initialize_cluster_management(
             format!("node-{}", i + 1)
         };
 
-        manager
-            .register_node(node_id.to_string(), endpoint.clone().to_string())
-            .await
-            .unwrap_or_else(|e| {
-                warn!("Failed to register node {}: {}", endpoint, e);
-            });
+        manager.register_node(&node_id, endpoint).await.unwrap_or_else(|e| {
+            warn!("Failed to register node {}: {}", endpoint, e);
+        });
     }
 
     Ok(manager)
@@ -220,7 +220,7 @@ mod tests {
     use super::*;
     use rustfs_topology::{NodeHealth, TopologyConfig};
     use std::sync::Arc;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     #[tokio::test]
     async fn test_cluster_manager_initialization() {
