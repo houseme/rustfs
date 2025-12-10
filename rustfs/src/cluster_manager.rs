@@ -22,6 +22,7 @@
 //! - EC quorum management
 
 use anyhow::Result;
+use futures_util::TryFutureExt;
 use rustfs_quorum::QuorumVerifier;
 use rustfs_topology::{HealthMonitor, SystemTopology, TopologyConfig};
 use std::sync::{Arc, LazyLock, RwLock as StdRwLock};
@@ -65,7 +66,7 @@ impl ClusterManager {
         info!("Initializing Cluster Manager for cluster: {}", cluster_id);
 
         let config = config.unwrap_or_default();
-        let interval = health_check_interval_secs.unwrap_or(10);
+        let _interval = health_check_interval_secs.unwrap_or(10);
 
         // Create topology manager
         let topology = SystemTopology::new(&cluster_id, config).await?;
@@ -76,10 +77,10 @@ impl ClusterManager {
         debug!("Quorum verifier initialized for {} nodes", initial_node_count);
 
         // Create and start health monitor
-        let health_monitor = HealthMonitor::new(Arc::clone(&topology));
-
+        let health_monitor = HealthMonitor::new(Arc::new(topology));
+        let mut health_monitor_clone = Arc::new(health_monitor);
         let health_monitor_handle = Some(tokio::spawn(async move {
-            if let Err(e) = health_monitor.start() {
+            if let Err(e) = health_monitor_clone.start() {
                 warn!("Health monitor encountered an error: {}", e);
             }
         }));
@@ -113,7 +114,7 @@ impl ClusterManager {
     /// # Arguments
     /// * `node_id` - Unique identifier for the node
     /// * `endpoint` - Network endpoint (e.g., "http://node1:9000")
-    pub async fn register_node(&self, node_id: &str, endpoint: &str) -> Result<()> {
+    pub async fn register_node(&self, node_id: &str, endpoint: &str) -> bool {
         debug!("Registering node: {} at {}", node_id, endpoint);
         self.topology.register_node(node_id.to_string(), endpoint.to_string()).await
     }
@@ -220,7 +221,7 @@ mod tests {
     use super::*;
     use rustfs_topology::{NodeHealth, TopologyConfig};
     use std::sync::Arc;
-    use tokio::time::{Duration, sleep};
+    use tokio::time::{sleep, Duration};
 
     #[tokio::test]
     async fn test_cluster_manager_initialization() {
@@ -241,10 +242,7 @@ mod tests {
             .await
             .expect("Failed to initialize manager");
 
-        manager
-            .register_node("node1".to_string(), "http://node1:9000".to_string())
-            .await
-            .expect("Failed to register node");
+        manager.register_node("node1", "http://node1:9000").await;
 
         let stats = manager.get_cluster_stats().await;
         assert!(stats.total_nodes >= 1);
@@ -259,9 +257,8 @@ mod tests {
         // Register nodes
         for i in 1..=4 {
             manager
-                .register_node(format!("node{}", i).to_string(), format!("http://node{}:9000", i).to_string())
-                .await
-                .expect("Failed to register node");
+                .register_node(&format!("node{}", i), &format!("http://node{}:9000", i))
+                .await;
         }
 
         // Check quorum (all nodes healthy initially)
@@ -278,10 +275,7 @@ mod tests {
             .await
             .expect("Failed to initialize manager");
 
-        manager
-            .register_node("node1".to_string(), "http://node1:9000".to_string())
-            .await
-            .expect("Failed to register node");
+        manager.register_node("node1", "http://node1:9000").await;
 
         // Record successful operation
         manager
@@ -300,7 +294,7 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -322,23 +316,14 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
         // Register nodes
-        manager
-            .register_node("node1".to_string(), "192.168.1.1:9000".to_string())
-            .await
-            .expect("Failed to register node1");
-        manager
-            .register_node("node2".to_string(), "192.168.1.2:9000".to_string())
-            .await
-            .expect("Failed to register node2");
-        manager
-            .register_node("node3".to_string(), "192.168.1.3:9000".to_string())
-            .await
-            .expect("Failed to register node3");
+        manager.register_node("node1", "192.168.1.1:9000").await;
+        manager.register_node("node2", "192.168.1.2:9000").await;
+        manager.register_node("node3", "192.168.1.3:9000").await;
 
         // Verify registration
         let stats = manager.get_cluster_stats().await;
@@ -356,15 +341,12 @@ mod tests {
         let total_nodes = 4;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
         // Register node
-        manager
-            .register_node("node1", "192.168.1.1:9000")
-            .await
-            .expect("Failed to register node1");
+        manager.register_node("node1", "192.168.1.1:9000").await;
 
         // Record successful operations - should transition to Healthy
         manager
@@ -408,7 +390,7 @@ mod tests {
         let total_nodes = 4; // Write quorum = 3 (N/2 + 1)
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
@@ -416,8 +398,7 @@ mod tests {
         for i in 1..=4 {
             manager
                 .register_node(&format!("node{}", i), &format!("192.168.1.{}:9000", i))
-                .await
-                .expect("Failed to register node");
+                .await;
         }
 
         // Mark 3 nodes as healthy (meets write quorum)
@@ -457,16 +438,15 @@ mod tests {
         let total_nodes = 4; // Read quorum = 2 (N/2)
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
         // Register nodes
         for i in 1..=4 {
             manager
-                .register_node(format!("node{}", i), format!("192.168.1.{}:9000", i))
-                .await
-                .expect("Failed to register node");
+                .register_node(&format!("node{}", i), &format!("192.168.1.{}:9000", i))
+                .await;
         }
 
         // Mark 2 nodes as healthy (meets read quorum)
@@ -509,16 +489,15 @@ mod tests {
             ..Default::default()
         };
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), Some(1))
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), Some(1))
             .await
             .expect("Failed to initialize cluster manager");
 
         // Register nodes
         for i in 1..=3 {
             manager
-                .register_node(format!("node{}", i), format!("192.168.1.{}:9000", i))
-                .await
-                .expect("Failed to register node");
+                .register_node(&format!("node{}", i), &format!("192.168.1.{}:9000", i))
+                .await;
             // Mark as healthy initially
             manager
                 .record_node_operation(&format!("node{}", i), true, Some(10))
@@ -571,7 +550,7 @@ mod tests {
         let config = TopologyConfig::default();
 
         let manager = Arc::new(
-            ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), None)
+            ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
                 .await
                 .expect("Failed to initialize cluster manager"),
         );
@@ -579,9 +558,8 @@ mod tests {
         // Register nodes
         for i in 1..=4 {
             manager
-                .register_node(format!("node{}", i), format!("192.168.1.{}:9000", i))
-                .await
-                .expect("Failed to register node");
+                .register_node(&format!("node{}", i), &format!("192.168.1.{}:9000", i))
+                .await;
         }
 
         // Spawn concurrent operations on different nodes
@@ -616,16 +594,15 @@ mod tests {
         let total_nodes = 5;
         let config = TopologyConfig::default();
 
-        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, shadow_rs::v1::Some(config), None)
+        let manager = ClusterManager::initialize(cluster_id.to_string(), total_nodes, Some(config), None)
             .await
             .expect("Failed to initialize cluster manager");
 
         // Register 5 nodes with different health states
         for i in 1..=5 {
             manager
-                .register_node(format!("node{}", i), format!("192.168.1.{}:9000", i))
-                .await
-                .expect("Failed to register node");
+                .register_node(&format!("node{}", i), &format!("192.168.1.{}:9000", i))
+                .await;
         }
 
         // Mark 3 as healthy
