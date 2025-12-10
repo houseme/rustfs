@@ -302,29 +302,38 @@ async fn run(opt: config::Opt) -> Result<()> {
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
 
+    // Count total endpoints across all pools
+    let total_endpoints: usize = endpoint_pools.0.iter().map(|pool| pool.endpoints.as_ref().len()).sum();
+
     let cluster_manager = ClusterManager::initialize(
         "rustfs-cluster".to_string(),
-        endpoint_pools.len(),
+        total_endpoints,
         Some(TopologyConfig::default()),
         health_check_interval,
     )
     .await
-    .inspect_err(|e| error!("Failed to initialize cluster manager: {}", e))?;
+    .map_err(|e| {
+        error!("Failed to initialize cluster manager: {}", e);
+        std::io::Error::new(std::io::ErrorKind::Other, e)
+    })?;
 
     // Register all cluster nodes from endpoint pools
-    for (i, endpoint) in endpoint_pools.endpoints().iter().enumerate() {
-        let node_id = format!("node-{}", i + 1);
-        let endpoint_addr = endpoint.to_string();
-        cluster_manager
-            .register_node(&node_id, &endpoint_addr)
-            .await
-            .inspect_err(|e| warn!("Failed to register node {}: {}", node_id, e))
-            .ok();
+    let mut node_idx = 0;
+    for pool in endpoint_pools.0.iter() {
+        for endpoint in pool.endpoints.as_ref().iter() {
+            node_idx += 1;
+            let node_id = format!("node-{}", node_idx);
+            let endpoint_addr = endpoint.to_string();
+            let is_new = cluster_manager.register_node(&node_id, &endpoint_addr).await;
+            if is_new {
+                debug!("Registered new node: {} at {}", node_id, endpoint_addr);
+            }
+        }
     }
 
     info!(
         "Cluster manager initialized with {} nodes, health check interval: {}s",
-        endpoint_pools.len(),
+        total_endpoints,
         health_check_interval.unwrap_or(10)
     );
 
