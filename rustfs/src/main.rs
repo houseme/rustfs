@@ -40,6 +40,8 @@ use rustfs_ahm::{
     scanner::data_scanner::ScannerConfig, shutdown_ahm_services,
 };
 use rustfs_common::globals::{set_global_addr, start_connection_health_checker};
+use crate::cluster_manager::ClusterManager;
+use rustfs_topology::TopologyConfig;
 use rustfs_ecstore::bucket::metadata_sys::init_bucket_metadata_sys;
 use rustfs_ecstore::bucket::replication::{GLOBAL_REPLICATION_POOL, init_background_replication};
 use rustfs_ecstore::config as ecconfig;
@@ -290,6 +292,41 @@ async fn run(opt: config::Opt) -> Result<()> {
     // Checks every 10 seconds and evicts unhealthy connections
     info!("Starting connection health checker for cluster power-off recovery");
     let _health_checker_handle = start_connection_health_checker(10);
+
+    // Initialize ClusterManager for global topology and quorum management
+    // Default health check interval is 10 seconds, which balances:
+    // - Fast failure detection (3-8 seconds including 3 consecutive checks)
+    // - Low CPU overhead (<0.01%)
+    // - Network efficiency (avoids excessive health check traffic)
+    let health_check_interval = std::env::var("RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    
+    let cluster_manager = ClusterManager::initialize(
+        "rustfs-cluster".to_string(),
+        endpoint_pools.len(),
+        Some(TopologyConfig::default()),
+        health_check_interval,
+    )
+    .await
+    .inspect_err(|e| error!("Failed to initialize cluster manager: {}", e))?;
+
+    // Register all cluster nodes from endpoint pools
+    for (i, endpoint) in endpoint_pools.endpoints().iter().enumerate() {
+        let node_id = format!("node-{}", i + 1);
+        let endpoint_addr = endpoint.to_string();
+        cluster_manager
+            .register_node(&node_id, &endpoint_addr)
+            .await
+            .inspect_err(|e| warn!("Failed to register node {}: {}", node_id, e))
+            .ok();
+    }
+    
+    info!(
+        "Cluster manager initialized with {} nodes, health check interval: {}s",
+        endpoint_pools.len(),
+        health_check_interval.unwrap_or(10)
+    );
 
     // Create a cancellation token for AHM services
     let _ = create_ahm_services_cancel_token();

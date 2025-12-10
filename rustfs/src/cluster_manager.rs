@@ -238,10 +238,13 @@ mod tests {
             .await
             .expect("Failed to initialize manager");
 
-        manager.register_node("node1", "http://node1:9000").await;
+        manager.register_node("node1", "http://node1:9000").await.ok();
 
         let stats = manager.get_cluster_stats().await;
         assert!(stats.total_nodes >= 1);
+        
+        // Shutdown to clean up
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     #[tokio::test]
@@ -254,15 +257,27 @@ mod tests {
         for i in 1..=4 {
             manager
                 .register_node(&format!("node{}", i), &format!("http://node{}:9000", i))
-                .await;
+                .await
+                .ok();
         }
 
-        // Check quorum (all nodes healthy initially)
+        // Mark nodes as healthy by recording successful operations
+        for i in 1..=4 {
+            manager
+                .record_node_operation(&format!("node{}", i), true, Some(10))
+                .await
+                .ok();
+        }
+
+        // Check quorum
         let write_quorum = manager.check_write_quorum().await.expect("Quorum check failed");
         let read_quorum = manager.check_read_quorum().await.expect("Quorum check failed");
 
         assert!(write_quorum, "Write quorum should be available with 4 healthy nodes");
         assert!(read_quorum, "Read quorum should be available with 4 healthy nodes");
+        
+        // Shutdown to clean up
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     #[tokio::test]
@@ -271,7 +286,7 @@ mod tests {
             .await
             .expect("Failed to initialize manager");
 
-        manager.register_node("node1", "http://node1:9000").await;
+        manager.register_node("node1", "http://node1:9000").await.ok();
 
         // Record successful operation
         manager
@@ -281,6 +296,9 @@ mod tests {
 
         let stats = manager.get_cluster_stats().await;
         assert!(stats.healthy_nodes >= 1);
+        
+        // Shutdown to clean up
+        Arc::try_unwrap(manager).unwrap().shutdown().await;
     }
 
     /// Test basic cluster initialization
@@ -317,9 +335,9 @@ mod tests {
             .expect("Failed to initialize cluster manager");
 
         // Register nodes
-        manager.register_node("node1", "192.168.1.1:9000").await;
-        manager.register_node("node2", "192.168.1.2:9000").await;
-        manager.register_node("node3", "192.168.1.3:9000").await;
+        manager.register_node("node1", "192.168.1.1:9000").await.ok();
+        manager.register_node("node2", "192.168.1.2:9000").await.ok();
+        manager.register_node("node3", "192.168.1.3:9000").await.ok();
 
         // Verify registration
         let stats = manager.get_cluster_stats().await;
@@ -342,7 +360,7 @@ mod tests {
             .expect("Failed to initialize cluster manager");
 
         // Register node
-        manager.register_node("node1", "192.168.1.1:9000").await;
+        manager.register_node("node1", "192.168.1.1:9000").await.ok();
 
         // Record successful operations - should transition to Healthy
         manager
