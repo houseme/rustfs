@@ -315,7 +315,7 @@ pub struct ClusterStats {
 impl ClusterStats {
     /// Get the count of operational nodes (healthy + degraded)
     #[inline]
-    fn operational_nodes(&self) -> usize {
+    pub fn operational_nodes(&self) -> usize {
         self.healthy_nodes + self.degraded_nodes
     }
 

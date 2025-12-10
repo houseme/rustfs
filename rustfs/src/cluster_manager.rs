@@ -78,11 +78,9 @@ impl ClusterManager {
 
         // Create and start health monitor
         let health_monitor = HealthMonitor::new(Arc::new(topology));
-        let mut health_monitor_clone = Arc::new(health_monitor);
+        let health_monitor_clone = Arc::new(health_monitor);
         let health_monitor_handle = Some(tokio::spawn(async move {
-            if let Err(e) = health_monitor_clone.start() {
-                warn!("Health monitor encountered an error: {}", e);
-            }
+            health_monitor_clone.start();
         }));
 
         debug!("Health monitor started");
@@ -134,7 +132,7 @@ impl ClusterManager {
     /// Returns true if at least N/2 + 1 nodes are operational
     pub async fn check_write_quorum(&self) -> Result<bool> {
         let stats = self.topology.get_cluster_stats().await;
-        self.quorum_verifier.check_write_quorum(stats.operational_nodes).await
+        self.quorum_verifier.check_write_quorum(stats.operational_nodes()).await
     }
 
     /// Check if read quorum is available for cluster operations
@@ -142,7 +140,7 @@ impl ClusterManager {
     /// Returns true if at least N/2 nodes are operational
     pub async fn check_read_quorum(&self) -> Result<bool> {
         let stats = self.topology.get_cluster_stats().await;
-        self.quorum_verifier.check_read_quorum(stats.operational_nodes).await
+        self.quorum_verifier.check_read_quorum(stats.operational_nodes()).await
     }
 
     /// Get cluster ID
@@ -309,9 +307,9 @@ mod tests {
         manager.shutdown().await;
     }
 
-    /// Test node registration and discovery
+    /// Test comprehensive node registration and discovery
     #[tokio::test]
-    async fn test_node_registration() {
+    async fn test_node_registration_complete() {
         let cluster_id = "test-cluster-registration";
         let total_nodes = 4;
         let config = TopologyConfig::default();
