@@ -14,6 +14,7 @@
 
 mod admin;
 mod auth;
+mod cluster_manager;
 mod config;
 mod error;
 // mod grpc;
