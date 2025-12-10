@@ -16,7 +16,7 @@
 
 use rustfs_common::globals::{
     ConnectionHealth, HealthState, evict_unhealthy_connections, get_connection_health, get_connection_health_stats,
-    record_connection_failure, record_connection_success, start_connection_health_checker,
+    record_peer_failure, record_peer_success, start_connection_health_checker,
 };
 use std::time::Duration;
 
@@ -87,18 +87,18 @@ async fn test_get_connection_health() {
 }
 
 #[tokio::test]
-async fn test_record_connection_success() {
+async fn test_record_peer_success() {
     let addr = "test-peer-6";
 
     // Record some failures first
-    record_connection_failure(addr).await;
-    record_connection_failure(addr).await;
+    record_peer_failure(addr).await;
+    record_peer_failure(addr).await;
 
     let health = get_connection_health(addr).await;
     assert_eq!(health.get_state(), HealthState::Degraded);
 
     // Record success should reset state
-    record_connection_success(addr).await;
+    record_peer_success(addr).await;
     assert_eq!(health.get_state(), HealthState::Healthy);
 }
 
@@ -107,8 +107,8 @@ async fn test_get_connection_health_stats() {
     let addr1 = "test-peer-7";
     let addr2 = "test-peer-8";
 
-    record_connection_failure(addr1).await;
-    record_connection_success(addr2).await;
+    record_peer_failure(addr1).await;
+    record_peer_success(addr2).await;
 
     let stats = get_connection_health_stats().await;
 
@@ -132,9 +132,9 @@ async fn test_evict_unhealthy_connections() {
     let addr = "test-peer-9";
 
     // Create a dead connection
-    record_connection_failure(addr).await;
-    record_connection_failure(addr).await;
-    record_connection_failure(addr).await;
+    record_peer_failure(addr).await;
+    record_peer_failure(addr).await;
+    record_peer_failure(addr).await;
 
     let health = get_connection_health(addr).await;
     assert_eq!(health.get_state(), HealthState::Dead);
@@ -155,10 +155,10 @@ async fn test_connection_health_checker_task() {
     let addr1 = "test-peer-10";
     let addr2 = "test-peer-11";
 
-    record_connection_success(addr1).await;
-    record_connection_failure(addr2).await;
-    record_connection_failure(addr2).await;
-    record_connection_failure(addr2).await;
+    record_peer_success(addr1).await;
+    record_peer_failure(addr2).await;
+    record_peer_failure(addr2).await;
+    record_peer_failure(addr2).await;
 
     // Wait for a couple of health check cycles
     tokio::time::sleep(Duration::from_secs(3)).await;

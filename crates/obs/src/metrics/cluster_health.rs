@@ -15,7 +15,7 @@
 #![allow(dead_code)]
 
 /// Cluster health-related metric descriptors
-use crate::{MetricDescriptor, MetricName, new_gauge_md, subsystems};
+use crate::{MetricDescriptor, MetricName, new_counter_md, new_gauge_md, subsystems};
 use std::sync::LazyLock;
 
 pub static HEALTH_DRIVES_OFFLINE_COUNT_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
@@ -82,7 +82,7 @@ pub static HEALTH_CONNECTIONS_DEAD_COUNT_MD: LazyLock<MetricDescriptor> = LazyLo
 });
 
 pub static HEALTH_CONNECTIONS_EVICTED_TOTAL_MD: LazyLock<MetricDescriptor> = LazyLock::new(|| {
-    new_gauge_md(
+    new_counter_md(
         MetricName::HealthConnectionsEvictedTotal,
         "Total count of evicted connections",
         &[],

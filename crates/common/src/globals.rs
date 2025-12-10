@@ -226,36 +226,52 @@ pub async fn get_connection_health(addr: &str) -> Arc<ConnectionHealth> {
     health
 }
 
-/// Record successful connection use (updates both circuit breaker and health tracking)
-pub async fn record_connection_success(addr: &str) {
-    // record_peer_success already updates connection health, so just call it
-    record_peer_success(addr).await;
+/// Configuration for connection health management
+pub struct ConnectionHealthConfig {
+    /// Maximum time in seconds a connection can be idle before eviction
+    pub max_idle_secs: u64,
+    /// Maximum number of consecutive failures before marking as dead
+    pub max_failures: u32,
+    /// Health check interval in seconds
+    pub health_check_interval_secs: u64,
 }
 
-/// Record failed connection use (updates both circuit breaker and health tracking)
-pub async fn record_connection_failure(addr: &str) {
-    // record_peer_failure already updates connection health, so just call it
-    record_peer_failure(addr).await;
+impl Default for ConnectionHealthConfig {
+    fn default() -> Self {
+        Self {
+            max_idle_secs: 30,
+            max_failures: 3,
+            health_check_interval_secs: 10,
+        }
+    }
 }
 
-/// Evict unhealthy connections from the global cache.
+/// Evict unhealthy connections from the global cache using default configuration.
 /// Returns the number of connections evicted.
 ///
 /// Connections are evicted if they meet any of these criteria:
-/// - Not successfully used in the last 30 seconds
-/// - 3 or more consecutive failures
-/// - Health check stale (3x the health check interval)
+/// - Not successfully used in the last 30 seconds (default)
+/// - 3 or more consecutive failures (default)
+/// - Health check stale (3x the health check interval, default 30s)
+///
+/// For custom configuration, use `evict_unhealthy_connections_with_config`.
 pub async fn evict_unhealthy_connections() -> usize {
-    const MAX_IDLE_SECS: u64 = 30;
-    const MAX_FAILURES: u32 = 3;
-    const HEALTH_CHECK_INTERVAL_SECS: u64 = 10;
+    evict_unhealthy_connections_with_config(&ConnectionHealthConfig::default()).await
+}
+
+/// Evict unhealthy connections using custom configuration.
+/// Returns the number of connections evicted.
+pub async fn evict_unhealthy_connections_with_config(config: &ConnectionHealthConfig) -> usize {
+    let max_idle_secs = config.max_idle_secs;
+    let max_failures = config.max_failures;
+    let health_check_interval_secs = config.health_check_interval_secs;
 
     let health_map = GLOBAL_CONN_HEALTH.read().await;
     let mut addrs_to_evict = Vec::new();
 
     for (addr, health) in health_map.iter() {
         if health
-            .should_evict(MAX_IDLE_SECS, MAX_FAILURES, HEALTH_CHECK_INTERVAL_SECS)
+            .should_evict(max_idle_secs, max_failures, health_check_interval_secs)
             .await
         {
             addrs_to_evict.push(addr.clone());
@@ -265,21 +281,31 @@ pub async fn evict_unhealthy_connections() -> usize {
 
     let evicted_count = addrs_to_evict.len();
     if evicted_count > 0 {
-        let mut conn_map = GLOBAL_CONN_MAP.write().await;
-        let health_map = GLOBAL_CONN_HEALTH.read().await;
+        // Get health info for logging before acquiring write lock
+        let health_info: Vec<_> = {
+            let health_map = GLOBAL_CONN_HEALTH.read().await;
+            addrs_to_evict
+                .iter()
+                .filter_map(|addr| {
+                    health_map
+                        .get(addr)
+                        .map(|health| (addr.clone(), health.get_state(), health.consecutive_failures.load(Ordering::Relaxed)))
+                })
+                .collect()
+        };
 
-        for addr in addrs_to_evict {
-            conn_map.remove(&addr);
-            if let Some(health) = health_map.get(&addr) {
-                warn!(
-                    "Evicting unhealthy connection: {} (state={:?}, failures={})",
-                    addr,
-                    health.get_state(),
-                    health.consecutive_failures.load(Ordering::Relaxed)
-                );
-            }
-            // Keep health tracker for metrics, but remove connection
+        // Now acquire write lock to evict connections
+        let mut conn_map = GLOBAL_CONN_MAP.write().await;
+        for addr in &addrs_to_evict {
+            conn_map.remove(addr);
         }
+        drop(conn_map);
+
+        // Log after releasing locks
+        for (addr, state, failures) in health_info {
+            warn!("Evicted unhealthy connection: {} (state={:?}, failures={})", addr, state, failures);
+        }
+        // Keep health tracker for metrics, but remove connection
     }
 
     evicted_count
@@ -287,13 +313,42 @@ pub async fn evict_unhealthy_connections() -> usize {
 
 /// Start a background task to periodically check and evict unhealthy connections.
 ///
-/// This task runs every `interval_secs` seconds and evicts connections that:
-/// - Haven't been successfully used recently
-/// - Have accumulated failures
-/// - Have stale health checks
+/// # Arguments
 ///
-/// This is critical for cluster power-off recovery scenarios where cached
-/// connections to dead nodes need to be proactively removed.
+/// * `interval_secs` - How often to run the health check (in seconds). Recommended: 10 seconds.
+///
+/// # Returns
+///
+/// A `JoinHandle` that can be used to abort the task if needed. The task runs indefinitely
+/// until aborted or the process exits.
+///
+/// # Behavior
+///
+/// This task runs every `interval_secs` seconds and evicts connections that:
+/// - Haven't been successfully used recently (default: 30 seconds)
+/// - Have accumulated failures (default: 3 or more)
+/// - Have stale health checks (default: 30 seconds)
+///
+/// The task also updates health check timestamps for all tracked connections
+/// to help identify stale connections in future iterations.
+///
+/// # Critical for Cluster Recovery
+///
+/// This is essential for cluster power-off recovery scenarios where cached
+/// connections to dead nodes need to be proactively removed to prevent operations
+/// from hanging on dead connections.
+///
+/// # Example
+///
+/// ```no_run
+/// use rustfs_common::globals::start_connection_health_checker;
+///
+/// // Start health checker with 10-second interval
+/// let handle = start_connection_health_checker(10);
+///
+/// // Task runs in background until process exit or explicit abort
+/// // handle.abort(); // Optionally abort when shutting down
+/// ```
 pub fn start_connection_health_checker(interval_secs: u64) -> tokio::task::JoinHandle<()> {
     info!("Starting connection health checker with interval: {}s", interval_secs);
 
