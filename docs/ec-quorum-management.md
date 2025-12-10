@@ -525,4 +525,4 @@ WARN Disk disk1 marked offline after 3 failures
 - [连接健康跟踪文档](cluster-power-failure-recovery.md)
 - [电路断路器实现](../crates/common/src/circuit_breaker.rs)
 - [QuorumManager源码](../crates/ecstore/src/quorum_manager.rs)
-- [纠删码实现](../crates/ecstore/src/erasure.rs)
+- [纠删码实现](../crates/ecstore/src/erasure_coding/erasure.rs)
