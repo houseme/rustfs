@@ -6981,6 +6981,7 @@ dependencies = [
 name = "rustfs"
 version = "0.0.5"
 dependencies = [
+ "anyhow",
  "astral-tokio-tar",
  "async-trait",
  "atoi",
@@ -7031,10 +7032,12 @@ dependencies = [
  "rustfs-obs",
  "rustfs-policy",
  "rustfs-protos",
+ "rustfs-quorum",
  "rustfs-rio",
  "rustfs-s3select-api",
  "rustfs-s3select-query",
  "rustfs-targets",
+ "rustfs-topology",
  "rustfs-utils",
  "rustfs-zip",
  "rustls 0.23.35",
@@ -7492,6 +7495,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-quorum"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
 name = "rustfs-rio"
 version = "0.0.5"
 dependencies = [
@@ -7594,6 +7607,19 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "rustfs-topology"
+version = "0.0.5"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dashmap",
+ "serde",
+ "tokio",
+ "tokio-test",
+ "tracing",
 ]
 
 [[package]]

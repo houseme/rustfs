@@ -12,20 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod reliant;
-
-// Common utilities for all E2E tests
-#[cfg(test)]
-pub mod common;
-
-// KMS-specific test modules
-#[cfg(test)]
-mod kms;
-
-// Special characters in path test modules
-#[cfg(test)]
-mod special_chars_test;
-
-// Content-Encoding header preservation test
-#[cfg(test)]
-mod content_encoding_test;
+//! Metrics collection for topology - placeholder for future development

@@ -161,6 +161,22 @@ pub const KI_B: usize = 1024;
 /// Default value: 1048576
 pub const MI_B: usize = 1024 * 1024;
 
+/// Environment variable for cluster health check interval
+/// Environment variable: RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL
+/// Used to set the interval for cluster health checks in seconds.
+/// Example: RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL=60
+/// Example: --cluster-health-check-interval 60
+/// Command line argument: --cluster-health-check-interval
+/// Default value: 60 seconds
+pub const ENV_CLUSTER_HEALTH_CHECK_INTERVAL: &str = "RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL";
+/// Default cluster health check interval in seconds
+/// Default value: 60 seconds
+/// Environment variable: RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL
+/// Command line argument: --cluster-health-check-interval
+/// Example: RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL=60
+/// Example: --cluster-health-check-interval 60
+pub const DEFAULT_CLUSTER_HEALTH_CHECK_INTERVAL_SECS: u64 = 60;
+
 #[cfg(test)]
 mod tests {
     use super::*;

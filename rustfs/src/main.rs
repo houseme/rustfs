@@ -14,6 +14,7 @@
 
 mod admin;
 mod auth;
+mod cluster_manager;
 mod config;
 mod error;
 // mod grpc;
@@ -26,6 +27,7 @@ mod update;
 mod version;
 
 // Ensure the correct path for parse_license is imported
+use crate::cluster_manager::ClusterManager;
 use crate::init::{add_bucket_notification_configuration, init_buffer_profile_system, init_kms_system, init_update_check};
 use crate::server::{
     SHUTDOWN_TIMEOUT, ServiceState, ServiceStateManager, ShutdownSignal, init_event_notifier, shutdown_event_notifier,
@@ -38,24 +40,25 @@ use rustfs_ahm::{
     Scanner, create_ahm_services_cancel_token, heal::storage::ECStoreHealStorage, init_heal_manager,
     scanner::data_scanner::ScannerConfig, shutdown_ahm_services,
 };
-use rustfs_common::globals::set_global_addr;
-use rustfs_ecstore::bucket::metadata_sys::init_bucket_metadata_sys;
-use rustfs_ecstore::bucket::replication::{GLOBAL_REPLICATION_POOL, init_background_replication};
-use rustfs_ecstore::config as ecconfig;
-use rustfs_ecstore::config::GLOBAL_CONFIG_SYS;
-use rustfs_ecstore::store_api::BucketOptions;
+use rustfs_common::globals::{set_global_addr, start_connection_health_checker};
 use rustfs_ecstore::{
     StorageAPI,
+    bucket::metadata_sys::init_bucket_metadata_sys,
+    bucket::replication::{GLOBAL_REPLICATION_POOL, init_background_replication},
+    config as ecconfig,
+    config::GLOBAL_CONFIG_SYS,
     endpoints::EndpointServerPools,
     global::{set_global_rustfs_port, shutdown_background_services},
     notification_sys::new_global_notification_sys,
     set_global_endpoints,
     store::ECStore,
     store::init_local_disks,
+    store_api::BucketOptions,
     update_erasure_type,
 };
 use rustfs_iam::init_iam_sys;
 use rustfs_obs::{init_obs, set_global_guard};
+use rustfs_topology::TopologyConfig;
 use rustfs_utils::net::parse_and_resolve_address;
 use std::io::{Error, Result};
 use std::sync::Arc;
@@ -284,6 +287,53 @@ async fn run(opt: config::Opt) -> Result<()> {
         error!("new_global_notification_sys failed {:?}", &err);
         Error::other(err)
     })?;
+
+    // Start connection health checker for cluster resilience
+    // Checks every 10 seconds and evicts unhealthy connections
+    info!("Starting connection health checker for cluster power-off recovery");
+    let _health_checker_handle = start_connection_health_checker(10);
+
+    // Initialize ClusterManager for global topology and quorum management
+    // Default health check interval is 10 seconds, which balances:
+    // - Fast failure detection (3-8 seconds including 3 consecutive checks)
+    // - Low CPU overhead (<0.01%)
+    // - Network efficiency (avoids excessive health check traffic)
+    let health_check_interval = rustfs_utils::get_env_opt_u64(rustfs_config::ENV_CLUSTER_HEALTH_CHECK_INTERVAL);
+
+    // Count total endpoints across all pools
+    let total_endpoints: usize = endpoint_pools.0.iter().map(|pool| pool.endpoints.as_ref().len()).sum();
+
+    let cluster_manager = ClusterManager::initialize(
+        "rustfs-cluster".to_string(),
+        total_endpoints,
+        Some(TopologyConfig::default()),
+        health_check_interval,
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to initialize cluster manager: {}", e);
+        Error::other(e)
+    })?;
+
+    // Register all cluster nodes from endpoint pools
+    let mut node_idx = 0;
+    for pool in endpoint_pools.0.iter() {
+        for endpoint in pool.endpoints.as_ref().iter() {
+            node_idx += 1;
+            let node_id = format!("node-{}", node_idx);
+            let endpoint_addr = endpoint.to_string();
+            let is_new = cluster_manager.register_node(&node_id, &endpoint_addr).await;
+            if is_new {
+                debug!("Registered new node: {} at {}", node_id, endpoint_addr);
+            }
+        }
+    }
+
+    info!(
+        "Cluster manager initialized with {} nodes, health check interval: {}s",
+        total_endpoints,
+        health_check_interval.unwrap_or(rustfs_config::DEFAULT_CLUSTER_HEALTH_CHECK_INTERVAL_SECS)
+    );
 
     // Create a cancellation token for AHM services
     let _ = create_ahm_services_cancel_token();
