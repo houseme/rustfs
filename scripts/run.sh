@@ -126,7 +126,7 @@ export RUSTFS_ENABLE_PROFILING=false
 export RUSTFS_HEAL_QUEUE_SIZE=10000
 
 # CLUSTER_HEALTH_CHECK_INTERVAL
-export RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL = 1 # Cluster health check interval in seconds
+export RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL=10 # Cluster health check interval in seconds
 
 if [ -n "$1" ]; then
 	export RUSTFS_VOLUMES="$1"

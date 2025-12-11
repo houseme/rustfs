@@ -37,12 +37,14 @@ pub struct ClusterManager {
     pub topology: Arc<SystemTopology>,
 
     /// Quorum verifier for cluster operations
+    #[allow(dead_code)]
     pub quorum_verifier: Arc<QuorumVerifier>,
 
     /// Health monitor service handle
     health_monitor: Option<HealthMonitor>,
 
     /// Cluster ID
+    #[allow(dead_code)]
     cluster_id: String,
 }
 
@@ -101,6 +103,7 @@ impl ClusterManager {
     }
 
     /// Get the global cluster manager instance
+    #[allow(dead_code)]
     pub fn get() -> Option<Arc<Self>> {
         GLOBAL_CLUSTER_MANAGER.read().ok()?.clone()
     }
@@ -110,6 +113,7 @@ impl ClusterManager {
     /// # Arguments
     /// * `node_id` - Unique identifier for the node
     /// * `endpoint` - Network endpoint (e.g., "http://node1:9000")
+    #[allow(dead_code)]
     pub async fn register_node(&self, node_id: &str, endpoint: &str) -> bool {
         debug!("Registering node: {} at {}", node_id, endpoint);
         self.topology.register_node(node_id.to_string(), endpoint.to_string()).await
@@ -121,6 +125,7 @@ impl ClusterManager {
     /// * `node_id` - Node identifier
     /// * `success` - Whether the operation was successful
     /// * `latency_ms` - Optional latency measurement
+    #[allow(dead_code)]
     pub async fn record_node_operation(&self, node_id: &str, success: bool, latency_ms: Option<u64>) -> Result<()> {
         self.topology.record_node_operation(node_id, success, latency_ms).await
     }
@@ -128,6 +133,7 @@ impl ClusterManager {
     /// Check if write quorum is available for cluster operations
     ///
     /// Returns true if at least N/2 + 1 nodes are operational
+    #[allow(dead_code)]
     pub async fn check_write_quorum(&self) -> Result<bool> {
         let stats = self.topology.get_cluster_stats().await;
         self.quorum_verifier.check_write_quorum(stats.operational_nodes()).await
@@ -136,17 +142,20 @@ impl ClusterManager {
     /// Check if read quorum is available for cluster operations
     ///
     /// Returns true if at least N/2 nodes are operational
+    #[allow(dead_code)]
     pub async fn check_read_quorum(&self) -> Result<bool> {
         let stats = self.topology.get_cluster_stats().await;
         self.quorum_verifier.check_read_quorum(stats.operational_nodes()).await
     }
 
     /// Get cluster ID
+    #[allow(dead_code)]
     pub fn get_cluster_id(&self) -> &str {
         &self.cluster_id
     }
 
     /// Get current cluster statistics
+    #[allow(dead_code)]
     pub async fn get_cluster_stats(&self) -> rustfs_topology::ClusterStats {
         self.topology.get_cluster_stats().await
     }
@@ -155,6 +164,7 @@ impl ClusterManager {
     ///
     /// Note: This method requires exclusive ownership. Consider using Arc::try_unwrap
     /// or other patterns to get mutable access from the shared Arc instance.
+    #[allow(dead_code)]
     pub async fn shutdown(&mut self) {
         info!("Shutting down Cluster Manager");
 
@@ -177,6 +187,8 @@ impl Drop for ClusterManager {
     }
 }
 
+type NodeIdFn = dyn Fn(&str, usize) -> String;
+
 /// Initialize cluster manager with automatic node discovery
 ///
 /// This is a convenience function for integration with existing RustFS initialization.
@@ -186,10 +198,11 @@ impl Drop for ClusterManager {
 /// * `endpoints` - List of node endpoints in the cluster
 /// * `node_id_fn` - Optional function to generate node IDs from endpoints
 /// * `health_check_interval_secs` - Optional health check interval (default: 10s)
+#[allow(dead_code)]
 pub async fn initialize_cluster_management(
     cluster_id: String,
     endpoints: &[String],
-    node_id_fn: Option<&dyn Fn(&str, usize) -> String>,
+    node_id_fn: Option<&NodeIdFn>,
     health_check_interval_secs: Option<u64>,
 ) -> Result<Arc<ClusterManager>> {
     let node_count = endpoints.len().max(1);
@@ -238,7 +251,7 @@ mod tests {
             .await
             .expect("Failed to initialize manager");
 
-        manager.register_node("node1", "http://node1:9000").await.ok();
+        manager.register_node("node1", "http://node1:9000").await;
 
         let stats = manager.get_cluster_stats().await;
         assert!(stats.total_nodes >= 1);
@@ -257,8 +270,7 @@ mod tests {
         for i in 1..=4 {
             manager
                 .register_node(&format!("node{}", i), &format!("http://node{}:9000", i))
-                .await
-                .ok();
+                .await;
         }
 
         // Mark nodes as healthy by recording successful operations
@@ -286,7 +298,7 @@ mod tests {
             .await
             .expect("Failed to initialize manager");
 
-        manager.register_node("node1", "http://node1:9000").await.ok();
+        manager.register_node("node1", "http://node1:9000").await;
 
         // Record successful operation
         manager
@@ -335,9 +347,9 @@ mod tests {
             .expect("Failed to initialize cluster manager");
 
         // Register nodes
-        manager.register_node("node1", "192.168.1.1:9000").await.ok();
-        manager.register_node("node2", "192.168.1.2:9000").await.ok();
-        manager.register_node("node3", "192.168.1.3:9000").await.ok();
+        manager.register_node("node1", "192.168.1.1:9000").await;
+        manager.register_node("node2", "192.168.1.2:9000").await;
+        manager.register_node("node3", "192.168.1.3:9000").await;
 
         // Verify registration
         let stats = manager.get_cluster_stats().await;
@@ -360,7 +372,7 @@ mod tests {
             .expect("Failed to initialize cluster manager");
 
         // Register node
-        manager.register_node("node1", "192.168.1.1:9000").await.ok();
+        manager.register_node("node1", "192.168.1.1:9000").await;
 
         // Record successful operations - should transition to Healthy
         manager

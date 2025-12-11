@@ -41,19 +41,19 @@ use rustfs_ahm::{
     scanner::data_scanner::ScannerConfig, shutdown_ahm_services,
 };
 use rustfs_common::globals::{set_global_addr, start_connection_health_checker};
-use rustfs_ecstore::bucket::metadata_sys::init_bucket_metadata_sys;
-use rustfs_ecstore::bucket::replication::{GLOBAL_REPLICATION_POOL, init_background_replication};
-use rustfs_ecstore::config as ecconfig;
-use rustfs_ecstore::config::GLOBAL_CONFIG_SYS;
-use rustfs_ecstore::store_api::BucketOptions;
 use rustfs_ecstore::{
     StorageAPI,
+    bucket::metadata_sys::init_bucket_metadata_sys,
+    bucket::replication::{GLOBAL_REPLICATION_POOL, init_background_replication},
+    config as ecconfig,
+    config::GLOBAL_CONFIG_SYS,
     endpoints::EndpointServerPools,
     global::{set_global_rustfs_port, shutdown_background_services},
     notification_sys::new_global_notification_sys,
     set_global_endpoints,
     store::ECStore,
     store::init_local_disks,
+    store_api::BucketOptions,
     update_erasure_type,
 };
 use rustfs_iam::init_iam_sys;
@@ -298,9 +298,7 @@ async fn run(opt: config::Opt) -> Result<()> {
     // - Fast failure detection (3-8 seconds including 3 consecutive checks)
     // - Low CPU overhead (<0.01%)
     // - Network efficiency (avoids excessive health check traffic)
-    let health_check_interval = std::env::var("RUSTFS_CLUSTER_HEALTH_CHECK_INTERVAL")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok());
+    let health_check_interval = rustfs_utils::get_env_opt_u64(rustfs_config::ENV_CLUSTER_HEALTH_CHECK_INTERVAL);
 
     // Count total endpoints across all pools
     let total_endpoints: usize = endpoint_pools.0.iter().map(|pool| pool.endpoints.as_ref().len()).sum();
@@ -314,7 +312,7 @@ async fn run(opt: config::Opt) -> Result<()> {
     .await
     .map_err(|e| {
         error!("Failed to initialize cluster manager: {}", e);
-        std::io::Error::new(std::io::ErrorKind::Other, e)
+        Error::other(e)
     })?;
 
     // Register all cluster nodes from endpoint pools
@@ -334,7 +332,7 @@ async fn run(opt: config::Opt) -> Result<()> {
     info!(
         "Cluster manager initialized with {} nodes, health check interval: {}s",
         total_endpoints,
-        health_check_interval.unwrap_or(10)
+        health_check_interval.unwrap_or(rustfs_config::DEFAULT_CLUSTER_HEALTH_CHECK_INTERVAL_SECS)
     );
 
     // Create a cancellation token for AHM services
