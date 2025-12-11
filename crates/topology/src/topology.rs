@@ -15,16 +15,18 @@
 //! SystemTopology implementation - centralized node state management
 
 use crate::types::*;
-use anyhow::Result;
-use dashmap::DashMap;
+use anyhow::{Result, anyhow};
+use chrono::Utc;
+use hashbrown::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Global topology state manager for RustFS cluster
 ///
 /// Maintains centralized view of all nodes in the cluster with their health
 /// states, metrics, and metadata. Provides fast lock-free reads for hot paths.
+/// Centralized topology state that uses hashbrown + async RwLocks for predictable lock scopes.
 #[derive(Debug, Clone)]
 pub struct SystemTopology {
     /// Cluster identifier
@@ -35,7 +37,7 @@ pub struct SystemTopology {
 
     /// Concurrent map of node_id -> NodeStatus
     /// DashMap allows lock-free concurrent reads
-    nodes: Arc<DashMap<String, Arc<RwLock<NodeStatus>>>>,
+    nodes: Arc<RwLock<HashMap<String, Arc<RwLock<NodeStatus>>>>>,
 
     /// Cluster-wide statistics (cached, periodically updated)
     stats: Arc<RwLock<ClusterStats>>,
@@ -67,7 +69,7 @@ impl SystemTopology {
         let topology = Self {
             cluster_id: cluster_id.to_string(),
             config,
-            nodes: Arc::new(DashMap::new()),
+            nodes: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(ClusterStats {
                 total_nodes: 0,
                 healthy_nodes: 0,
@@ -95,22 +97,19 @@ impl SystemTopology {
     ///
     /// Returns true if this is a new node, false if updating existing
     pub async fn register_node(&self, node_id: String, endpoint: String) -> bool {
-        let is_new = !self.nodes.contains_key(&node_id);
-
-        if is_new {
-            info!(node_id = %node_id, endpoint = %endpoint, "Registering new node");
-            let status = NodeStatus::new(endpoint, node_id.clone());
-            self.nodes.insert(node_id, Arc::new(RwLock::new(status)));
-        } else {
+        let mut nodes = self.nodes.write().await;
+        if nodes.contains_key(&node_id) {
             debug!(node_id = %node_id, "Node already registered");
+            return false;
         }
 
-        // Update stats after registration
-        if is_new {
-            self.update_cluster_stats().await;
-        }
+        info!(node_id = %node_id, endpoint = %endpoint, "Registering new node");
+        let status = NodeStatus::new(endpoint, node_id.clone());
+        nodes.insert(node_id, Arc::new(RwLock::new(status)));
+        drop(nodes);
 
-        is_new
+        self.update_cluster_stats().await;
+        true
     }
 
     /// Update health status for a node
@@ -120,52 +119,41 @@ impl SystemTopology {
     /// * `node_id` - Node identifier
     /// * `health` - New health state
     pub async fn update_node_health(&self, node_id: &str, health: NodeHealth) -> Result<()> {
-        if let Some(node_ref) = self.nodes.get(node_id) {
-            let mut node = node_ref.write().await;
-            let old_health = node.health;
-            node.set_health(health);
+        let node_lock = self.require_node_lock(node_id).await?;
+        let mut node = node_lock.write().await;
+        let old_health = node.health;
+        node.set_health(health);
+        let changed = old_health != node.health;
+        drop(node);
 
-            if old_health != health {
-                info!(
-                    node_id = %node_id,
-                    old_health = ?old_health,
-                    new_health = ?health,
-                    "Node health state changed"
-                );
-                drop(node); // Release lock before updating stats
-                self.update_cluster_stats().await;
-            }
-
-            Ok(())
-        } else {
-            warn!(node_id = %node_id, "Attempted to update health for unknown node");
-            anyhow::bail!("Node {} not found in topology", node_id)
+        if changed {
+            info!(
+                node_id = %node_id,
+                old = ?old_health,
+                new = ?health,
+                "Node health changed explicitly"
+            );
+            self.update_cluster_stats().await;
         }
+
+        Ok(())
     }
 
     /// Record a successful operation to a node
     pub async fn record_node_success(&self, node_id: &str, latency_ms: u64) -> Result<()> {
-        if let Some(node_ref) = self.nodes.get(node_id) {
-            let mut node = node_ref.write().await;
-            node.metrics.record_success(latency_ms);
+        let node_lock = self.require_node_lock(node_id).await?;
+        let mut node = node_lock.write().await;
+        node.metrics.record_success(latency_ms);
 
-            // Check if node should transition to degraded state
-            let is_degraded = node
-                .metrics
-                .is_degraded(self.config.degraded_latency_threshold_ms, self.config.degraded_error_rate_threshold);
+        let desired = Self::evaluate_operational_health(&node.metrics, &self.config);
+        let mutated = Self::apply_health_transition(node_id, &mut node, desired);
+        drop(node);
 
-            if is_degraded && node.health == NodeHealth::Healthy {
-                node.set_health(NodeHealth::Degraded);
-                info!(node_id = %node_id, "Node transitioned to Degraded due to metrics");
-            } else if !is_degraded && node.health == NodeHealth::Degraded {
-                node.set_health(NodeHealth::Healthy);
-                info!(node_id = %node_id, "Node recovered to Healthy state");
-            }
-
-            Ok(())
-        } else {
-            anyhow::bail!("Node {} not found in topology", node_id)
+        if mutated {
+            self.update_cluster_stats().await;
         }
+
+        Ok(())
     }
 
     /// Record a node operation with its result and optional latency
@@ -185,92 +173,72 @@ impl SystemTopology {
 
     /// Record a failed operation to a node
     pub async fn record_node_failure(&self, node_id: &str) -> Result<()> {
-        if let Some(node_ref) = self.nodes.get(node_id) {
-            let mut node = node_ref.write().await;
-            node.metrics.record_failure();
+        let node_lock = self.require_node_lock(node_id).await?;
+        let mut node = node_lock.write().await;
+        node.metrics.record_failure();
 
-            // Check if node should be marked as offline based on consecutive failures
-            let failure_count = (node.metrics.request_count - node.metrics.success_count) as u32;
-            let should_mark_offline = node.metrics.error_rate > 0.5 && failure_count >= self.config.failure_threshold;
+        let failure_count = node.metrics.request_count.saturating_sub(node.metrics.success_count) as u32;
+        let should_offline = node.metrics.error_rate > 0.5 && failure_count >= self.config.failure_threshold;
 
-            if should_mark_offline && node.health.is_operational() {
-                node.set_health(NodeHealth::Offline {
-                    since: chrono::Utc::now(),
-                    failure_count,
-                });
-                warn!(node_id = %node_id, "Node marked as Offline due to consecutive failures");
+        let desired = if should_offline {
+            NodeHealth::Offline {
+                since: Utc::now(),
+                failure_count,
             }
-
-            Ok(())
         } else {
-            anyhow::bail!("Node {} not found in topology", node_id)
+            Self::evaluate_operational_health(&node.metrics, &self.config)
+        };
+
+        let mutated = Self::apply_health_transition(node_id, &mut node, desired);
+        drop(node);
+
+        if mutated {
+            self.update_cluster_stats().await;
         }
+
+        Ok(())
     }
 
     /// Get status of a specific node
     pub async fn get_node_status(&self, node_id: &str) -> Option<NodeStatus> {
-        if let Some(node_ref) = self.nodes.get(node_id) {
-            Some(node_ref.read().await.clone())
-        } else {
-            None
-        }
+        let handle = {
+            let nodes = self.nodes.read().await;
+            nodes.get(node_id).cloned()
+        }?;
+
+        Some(handle.read().await.clone())
     }
 
     /// Get all healthy nodes
     pub async fn get_healthy_nodes(&self) -> Vec<NodeStatus> {
-        let mut healthy = Vec::new();
-
-        for entry in self.nodes.iter() {
-            let node = entry.value().read().await;
-            if node.health == NodeHealth::Healthy {
-                healthy.push(node.clone());
-            }
-        }
-
-        healthy
+        self.collect_nodes_matching(|status| status.health == NodeHealth::Healthy)
+            .await
     }
 
     /// Get all operational nodes (healthy + degraded)
     pub async fn get_operational_nodes(&self) -> Vec<NodeStatus> {
-        let mut operational = Vec::new();
-
-        for entry in self.nodes.iter() {
-            let node = entry.value().read().await;
-            if node.health.is_operational() {
-                operational.push(node.clone());
-            }
-        }
-
-        operational
+        self.collect_nodes_matching(|status| status.health.is_operational()).await
     }
 
     /// Get all nodes regardless of state
     pub async fn get_all_nodes(&self) -> Vec<NodeStatus> {
-        let mut all = Vec::new();
-
-        for entry in self.nodes.iter() {
-            let node = entry.value().read().await;
-            all.push(node.clone());
-        }
-
-        all
+        self.collect_nodes_matching(|_| true).await
     }
 
     /// Remove a node from topology (e.g., decommissioned)
     pub async fn remove_node(&self, node_id: &str) -> Option<NodeStatus> {
         info!(node_id = %node_id, "Removing node from topology");
 
-        let removed = if let Some((_, node_ref)) = self.nodes.remove(node_id) {
-            Some(node_ref.read().await.clone())
-        } else {
-            None
-        };
+        let removed = {
+            let mut nodes = self.nodes.write().await;
+            nodes.remove(node_id)
+        }?;
 
-        if removed.is_some() {
-            self.update_cluster_stats().await;
-        }
+        let snapshot = removed.read().await.clone();
+        drop(removed);
 
-        removed
+        self.update_cluster_stats().await;
+        Some(snapshot)
     }
 
     /// Get current cluster statistics
@@ -283,77 +251,68 @@ impl SystemTopology {
     /// This method recalculates stats from all nodes. Called automatically
     /// when topology changes or can be called manually for fresh stats.
     pub async fn update_cluster_stats(&self) {
-        let mut total_nodes = 0;
-        let mut healthy_nodes = 0;
-        let mut degraded_nodes = 0;
-        let mut unreachable_nodes = 0;
-        let mut offline_nodes = 0;
-        let mut suspended_nodes = 0;
-        let mut unknown_nodes = 0;
+        let handles = {
+            let nodes = self.nodes.read().await;
+            nodes.values().cloned().collect::<Vec<_>>()
+        };
 
-        let mut total_latency: u64 = 0;
+        let mut stats = ClusterStats {
+            total_nodes: 0,
+            healthy_nodes: 0,
+            degraded_nodes: 0,
+            unreachable_nodes: 0,
+            offline_nodes: 0,
+            suspended_nodes: 0,
+            unknown_nodes: 0,
+            avg_latency_ms: None,
+            avg_error_rate: 0.0,
+        };
+
+        let mut latency_acc: u64 = 0;
         let mut latency_count: u64 = 0;
-        let mut total_error_rate: f64 = 0.0;
+        let mut aggregated_error_rate = 0.0;
 
-        // Collect nodes to avoid holding locks during iteration
-        let mut nodes_to_process = Vec::new();
-        for entry in self.nodes.iter() {
-            nodes_to_process.push(Arc::clone(entry.value()));
-        }
-
-        for node_ref in nodes_to_process {
-            let node = node_ref.read().await;
-            total_nodes += 1;
+        for handle in handles {
+            let node = handle.read().await;
+            stats.total_nodes += 1;
 
             match node.health {
-                NodeHealth::Healthy => healthy_nodes += 1,
-                NodeHealth::Degraded => degraded_nodes += 1,
-                NodeHealth::Unreachable => unreachable_nodes += 1,
-                NodeHealth::Offline { .. } => offline_nodes += 1,
-                NodeHealth::Suspended => suspended_nodes += 1,
-                NodeHealth::Unknown => unknown_nodes += 1,
+                NodeHealth::Healthy => stats.healthy_nodes += 1,
+                NodeHealth::Degraded => stats.degraded_nodes += 1,
+                NodeHealth::Unreachable => stats.unreachable_nodes += 1,
+                NodeHealth::Offline { .. } => stats.offline_nodes += 1,
+                NodeHealth::Suspended => stats.suspended_nodes += 1,
+                NodeHealth::Unknown => stats.unknown_nodes += 1,
             }
 
             if let Some(latency) = node.metrics.latency_ms {
-                total_latency += latency;
+                latency_acc += latency;
                 latency_count += 1;
             }
 
-            total_error_rate += node.metrics.error_rate;
+            aggregated_error_rate += node.metrics.error_rate;
         }
 
-        let avg_latency_ms = if latency_count > 0 {
-            Some(total_latency / latency_count)
+        stats.avg_latency_ms = if latency_count > 0 {
+            Some(latency_acc / latency_count)
         } else {
             None
         };
 
-        let avg_error_rate = if total_nodes > 0 {
-            total_error_rate / total_nodes as f64
+        stats.avg_error_rate = if stats.total_nodes > 0 {
+            aggregated_error_rate / stats.total_nodes as f64
         } else {
             0.0
         };
 
-        let stats = ClusterStats {
-            total_nodes,
-            healthy_nodes,
-            degraded_nodes,
-            unreachable_nodes,
-            offline_nodes,
-            suspended_nodes,
-            unknown_nodes,
-            avg_latency_ms,
-            avg_error_rate,
-        };
-
-        *self.stats.write().await = stats;
+        *self.stats.write().await = stats.clone();
 
         debug!(
-            total = total_nodes,
-            healthy = healthy_nodes,
-            degraded = degraded_nodes,
-            offline = offline_nodes,
-            "Updated cluster statistics"
+            total = stats.total_nodes,
+            healthy = stats.healthy_nodes,
+            degraded = stats.degraded_nodes,
+            offline = stats.offline_nodes,
+            "Cluster statistics updated"
         );
     }
 
@@ -376,6 +335,65 @@ impl SystemTopology {
     pub async fn has_read_quorum(&self) -> bool {
         self.stats.read().await.has_read_quorum()
     }
+
+    async fn require_node_lock(&self, node_id: &str) -> Result<Arc<RwLock<NodeStatus>>> {
+        let nodes = self.nodes.read().await;
+        nodes
+            .get(node_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Node {} not found in topology", node_id))
+    }
+
+    async fn collect_nodes_matching<F>(&self, predicate: F) -> Vec<NodeStatus>
+    where
+        F: Fn(&NodeStatus) -> bool,
+    {
+        let handles = {
+            let nodes = self.nodes.read().await;
+            nodes.values().cloned().collect::<Vec<_>>()
+        };
+
+        let mut gathered = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let node = handle.read().await;
+            if predicate(&node) {
+                gathered.push(node.clone());
+            }
+        }
+        gathered
+    }
+
+    fn evaluate_operational_health(metrics: &NodeMetrics, config: &TopologyConfig) -> NodeHealth {
+        if metrics.request_count == 0 {
+            return NodeHealth::Unknown;
+        }
+
+        let latency_flag = metrics
+            .latency_ms
+            .map(|latency| latency > config.degraded_latency_threshold_ms)
+            .unwrap_or(false);
+
+        if latency_flag || metrics.error_rate > config.degraded_error_rate_threshold {
+            NodeHealth::Degraded
+        } else {
+            NodeHealth::Healthy
+        }
+    }
+
+    fn apply_health_transition(node_id: &str, node: &mut NodeStatus, desired: NodeHealth) -> bool {
+        if node.health == desired {
+            return false;
+        }
+
+        info!(
+            node_id = %node_id,
+            old = ?node.health,
+            new = ?desired,
+            "Node health transition triggered by metrics"
+        );
+        node.set_health(desired);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -388,21 +406,22 @@ mod tests {
         let topology = SystemTopology::new("test-cluster", config).await.unwrap();
 
         // Register a new node
-        let is_new = topology
-            .register_node("node1".to_string(), "localhost:9000".to_string())
-            .await;
-        assert!(is_new);
+        assert!(
+            topology
+                .register_node("node1".to_string(), "localhost:9000".to_string())
+                .await
+        );
 
         // Register same node again
-        let is_new = topology
-            .register_node("node1".to_string(), "localhost:9000".to_string())
-            .await;
-        assert!(!is_new);
+        assert!(
+            !topology
+                .register_node("node1".to_string(), "localhost:9000".to_string())
+                .await
+        );
 
         // Verify node exists
-        let status = topology.get_node_status("node1").await;
-        assert!(status.is_some());
-        assert_eq!(status.unwrap().endpoint, "localhost:9000");
+        let status = topology.get_node_status("node1").await.unwrap();
+        assert_eq!(status.endpoint, "localhost:9000");
     }
 
     #[tokio::test]
@@ -467,7 +486,7 @@ mod tests {
             .update_node_health(
                 "node3",
                 NodeHealth::Offline {
-                    since: chrono::Utc::now(),
+                    since: Utc::now(),
                     failure_count: 1,
                 },
             )
@@ -480,5 +499,22 @@ mod tests {
         assert_eq!(stats.offline_nodes, 1);
         assert!(stats.has_write_quorum()); // 2 > 3/2
         assert!(stats.has_read_quorum()); // 2 >= 3/2
+    }
+
+    #[tokio::test]
+    async fn test_failure_escalation_to_offline() {
+        let config = TopologyConfig::default();
+        let topology = SystemTopology::new("test-cluster", config).await.unwrap();
+
+        topology
+            .register_node("node1".to_string(), "localhost:9000".to_string())
+            .await;
+
+        for _ in 0..5 {
+            topology.record_node_failure("node1").await.unwrap();
+        }
+
+        let status = topology.get_node_status("node1").await.unwrap();
+        assert!(matches!(status.health, NodeHealth::Offline { .. }));
     }
 }

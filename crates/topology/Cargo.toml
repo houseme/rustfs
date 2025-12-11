@@ -29,7 +29,6 @@ categories.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
 
 # Data Structures
-dashmap = "6.1.0"
 hashbrown = { workspace = true }
 
 # Serialization
@@ -40,6 +39,7 @@ anyhow = { workspace = true }
 
 # Logging and Metrics
 tracing = { workspace = true }
+metrics = { workspace = true }
 
 # Time
 chrono = { workspace = true }
