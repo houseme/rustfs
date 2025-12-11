@@ -7616,6 +7616,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dashmap",
+ "hashbrown 0.16.1",
  "serde",
  "tokio",
  "tokio-test",

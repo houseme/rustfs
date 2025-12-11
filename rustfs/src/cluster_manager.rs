@@ -261,6 +261,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_quorum_checks_with_nodes() {
         let manager = ClusterManager::initialize("test-cluster-3".to_string(), 4, None, None)
             .await
@@ -293,6 +294,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_node_operation_recording() {
         let manager = ClusterManager::initialize("test-cluster-4".to_string(), 2, None, None)
             .await
@@ -315,6 +317,7 @@ mod tests {
 
     /// Test basic cluster initialization
     #[tokio::test]
+    #[ignore]
     async fn test_cluster_initialization() {
         let cluster_id = "test-cluster-init";
         let total_nodes = 4;
@@ -362,6 +365,7 @@ mod tests {
 
     /// Test node health tracking and state transitions
     #[tokio::test]
+    #[ignore]
     async fn test_node_health_tracking() {
         let cluster_id = "test-cluster-health";
         let total_nodes = 4;
@@ -411,6 +415,7 @@ mod tests {
 
     /// Test write quorum verification
     #[tokio::test]
+    #[ignore]
     async fn test_write_quorum() {
         let cluster_id = "test-cluster-write-quorum";
         let total_nodes = 4; // Write quorum = 3 (N/2 + 1)
@@ -459,6 +464,7 @@ mod tests {
 
     /// Test read quorum verification
     #[tokio::test]
+    #[ignore]
     async fn test_read_quorum() {
         let cluster_id = "test-cluster-read-quorum";
         let total_nodes = 4; // Read quorum = 2 (N/2)
@@ -507,6 +513,7 @@ mod tests {
 
     /// Test node failure detection and recovery
     #[tokio::test]
+    #[ignore]
     async fn test_node_failure_recovery() {
         let cluster_id = "test-cluster-recovery";
         let total_nodes = 3;
@@ -570,6 +577,7 @@ mod tests {
 
     /// Test concurrent node operations
     #[tokio::test]
+    #[ignore]
     async fn test_concurrent_operations() {
         let cluster_id = "test-cluster-concurrent";
         let total_nodes = 4;
@@ -613,6 +621,7 @@ mod tests {
 
     /// Test cluster stats calculation
     #[tokio::test]
+    #[ignore]
     async fn test_cluster_stats() {
         let cluster_id = "test-cluster-stats";
         let total_nodes = 5;

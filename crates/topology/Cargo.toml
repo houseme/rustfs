@@ -30,6 +30,7 @@ tokio = { workspace = true, features = ["sync", "time", "macros"] }
 
 # Data Structures
 dashmap = "6.1.0"
+hashbrown = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
