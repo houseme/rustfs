@@ -245,7 +245,7 @@ aws-smithy-http-client = { default-features = false, version = "1.4.0" }
 aws-smithy-runtime-api = { version = "1.15.0" }
 aws-smithy-types = { version = "1.6.2" }
 base64-simd = "0.8.0"
-brotli = "8.0.4"
+brotli = "9.0.0"
 clap = { version = "4.6.6" }
 const-str = { version = "1.1.0" }
 convert_case = "0.12.0"
@@ -365,7 +365,7 @@ dav-server = "0.11.0"
 
 # Performance Analysis and Memory Profiling
 rustfs-mimalloc = { version = "0.5.1" }
-hotpath = { version = "0.24.0", default-features = false }
+hotpath = { version = "0.25.0", default-features = false }
 # Snapshot testing for output format regression detection
 insta = { version = "1.48" }
 
